@@ -13,7 +13,6 @@ MODULE et_coupling_pod_utils
    USE cp_fm_basic_linalg,              ONLY: cp_fm_syrk,&
                                               cp_fm_upper_to_full
    USE cp_fm_diag,                      ONLY: choose_eigv_solver
-   USE cp_fm_struct,                    ONLY: cp_fm_struct_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
                                               cp_fm_release,&
                                               cp_fm_to_fm,&
@@ -49,18 +48,16 @@ CONTAINS
 !> \param output_unit unit number of the open output stream
 !> \param qs_env QuickStep environment containing all system data
 !> \param ec electronic coupling data structure
-!> \param fm_s full-matrix structure used for allocation of transformation matrices
 !> \param mat_w working matrix of the same dimension
 !> \param n_ao number of atomic orbitLals (dimension of S matrix)
 !> \author Z. Futera (02.2017)
 ! **************************************************************************************************
-   SUBROUTINE pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
+   SUBROUTINE pod_get_transf_mat(output_unit, qs_env, ec, mat_w, n_ao)
 
       ! Routine arguments
       INTEGER                                            :: output_unit
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_cpl), POINTER                              :: ec
-      TYPE(cp_fm_struct_type), POINTER                   :: fm_s
       TYPE(cp_fm_type), POINTER                          :: mat_w
       INTEGER                                            :: n_ao
 
@@ -69,7 +66,8 @@ CONTAINS
                                      routineP = moduleN//':'//routineN
 
       ! Local variables
-      INTEGER                                            :: i, n_deps, handle
+      INTEGER                                            :: i
+      INTEGER                                            :: n_deps
       REAL(KIND=dp)                                      :: f
       REAL(KIND=dp), DIMENSION(:), ALLOCATABLE           :: et, ei
       TYPE(cp_fm_type), POINTER                          :: mat_u
@@ -83,12 +81,7 @@ CONTAINS
       INTEGER                                            :: n_p_row, n_p_col
       INTEGER                                            :: p_row_0, p_col_0
       INTEGER                                            :: p_row_i, p_col_i
-#endif
 
-      ! Time mark
-      CALL timeset(routineN, handle)
-
-#if defined(__SCALAPACK)
       ! Number of rows/columns in Scalapack blocks
       n_b_row = mat_w%matrix_struct%nrow_block
       n_b_col = mat_w%matrix_struct%ncol_block
@@ -112,12 +105,6 @@ CONTAINS
       ALLOCATE (ei(n_ao))
       et(:) = 0.0_dp
       ei(:) = 0.0_dp
-
-      ! Allocate memory for the transformation matrices
-      CALL cp_fm_create(matrix=ec%tmatf, matrix_struct=fm_s, &
-                        name='S^(-1/2) TRANSFORMATION MATRIX')
-      CALL cp_fm_create(matrix=ec%tmatr, matrix_struct=fm_s, &
-                        name='S^(+1/2) TRANSFORMATION MATRIX')
 
       ! Diagonalization of S
       CALL get_qs_env(qs_env, matrix_s=mat_s)
@@ -231,9 +218,6 @@ CONTAINS
       DEALLOCATE (et)
       DEALLOCATE (ei)
 
-      ! Running time
-      CALL timestop(handle)
-
    END SUBROUTINE pod_get_transf_mat
 
 ! **************************************************************************************************
@@ -247,112 +231,87 @@ CONTAINS
 !> \return ...
 !> \author Z. Futera (03.2019)
 ! **************************************************************************************************
-   FUNCTION pod_check_restart(logger, ec_sec, file_tmf, file_tmr, file_hab, file_wfn, blocks) &
-      RESULT(restart)
+   FUNCTION pod_check_restart(logger, ec_sec, file_tmf, file_tmr, file_hab, file_wfn) RESULT(restart)
 
       ! Routine arguments
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(section_vals_type), POINTER                   :: ec_sec
       CHARACTER(LEN=default_path_length), OPTIONAL       :: file_tmf, file_tmr, file_hab, file_wfn
-      LOGICAL, OPTIONAL, INTENT(OUT)                     :: blocks
-      ! Returning value
       LOGICAL                                            :: restart
 
-      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_check_restart', &
          routineP = moduleN//':'//routineN
 
-      ! Local variables
-      INTEGER                                            :: handle
-      LOGICAL                                            :: ok,bk
+      CHARACTER(LEN=default_path_length)                 :: filename
+      LOGICAL                                            :: ok
       TYPE(section_vals_type), POINTER                   :: print_key
 
-      ! Time mark
-      CALL timeset(routineN, handle)
+! Returning value
+! Routine name for debug purposes
+! Local variables
 
-      ! Initialization 
-      bk = .FALSE.
-
-      ! Check whether user wants to use data from the restart files
+      ! restart
       restart = section_get_lval(ec_sec, 'RESTART')
 
-      ! Forward transformation matrix
-      IF (PRESENT(file_tmf)) THEN
-         print_key => section_vals_get_subs_vals(ec_sec, &
-                                                 'PRINT%TRANSF_MATRIX_F')
-         file_tmf = cp_print_key_generate_filename(logger, print_key, &
-                                                   middle_name='RESTART', extension='.tmf', my_local=.FALSE.)
-         IF (restart) THEN
-            INQUIRE (file=file_tmf, exist=ok)
-            IF (.NOT. ok) THEN
-               CPWARN('restart file "'//TRIM(ADJUSTL(file_tmf))//'" not found')
-               file_tmf = ''
-            END IF
-         END IF
-      END IF
+      IF (restart) THEN
 
-      ! Reverse transformation matrix
-      IF (PRESENT(file_tmr)) THEN
-         print_key => section_vals_get_subs_vals(ec_sec, &
-                                                 'PRINT%TRANSF_MATRIX_R')
-         file_tmr = cp_print_key_generate_filename(logger, print_key, &
-                                                   middle_name='RESTART', extension='.tmr', my_local=.FALSE.)
-         IF (restart) THEN
-            INQUIRE (file=file_tmr, exist=ok)
+         ! Forward transformation matrix
+         IF (PRESENT(file_tmf)) THEN
+            print_key => section_vals_get_subs_vals(ec_sec, &
+                                                    'PRINT%TRANSF_MATRIX_F')
+            filename = cp_print_key_generate_filename(logger, print_key, &
+                                                      middle_name='RESTART', extension='.tmf', my_local=.FALSE.)
+            INQUIRE (FILE=filename, exist=ok)
             IF (.NOT. ok) THEN
-               CPWARN('restart file "'//TRIM(ADJUSTL(file_tmr))//'" not found')
-               file_tmr = ''
-            END IF
-         END IF
-      END IF
-
-      ! Hamiltonian restart file
-      IF (PRESENT(file_hab)) THEN
-         print_key => section_vals_get_subs_vals(ec_sec, &
-                                                 'PRINT%HAMILTONIAN')
-         file_hab = cp_print_key_generate_filename(logger, print_key, &
-                                                   middle_name='RESTART', extension='.hab', my_local=.FALSE.)
-         IF (restart) THEN
-            INQUIRE (file=file_hab, exist=ok)
-            IF (.NOT. ok) THEN
-               CPWARN('restart file "'//TRIM(ADJUSTL(file_hab))//'" not found')
-               file_hab = ''
+               CPABORT('restart file "'//TRIM(ADJUSTL(filename))//'" not found')
+            ELSE
+               file_tmf = filename
             END IF
          END IF
 
-         ! Blocks rather than full Hamiltonian
-         bk = section_get_lval(print_key, 'BLOCKS_ONLY')
-
-      END IF
-
-      ! MO restart file
-      IF (PRESENT(file_wfn)) THEN
-         print_key => section_vals_get_subs_vals(ec_sec, &
-                                                 'PRINT%WAVEFUNCTION')
-         file_wfn = cp_print_key_generate_filename(logger, print_key, &
-                                                   middle_name='RESTART', extension='.wfn', my_local=.FALSE.)
-         IF (restart) THEN
-            INQUIRE (file=file_wfn, exist=ok)
+         ! Reverse transformation matrix
+         IF (PRESENT(file_tmf)) THEN
+            print_key => section_vals_get_subs_vals(ec_sec, &
+                                                    'PRINT%TRANSF_MATRIX_R')
+            filename = cp_print_key_generate_filename(logger, print_key, &
+                                                      middle_name='RESTART', extension='.tmf', my_local=.FALSE.)
+            INQUIRE (FILE=filename, exist=ok)
             IF (.NOT. ok) THEN
-               CPWARN('restart file "'//TRIM(ADJUSTL(file_wfn))//'" not found')
-               file_wfn = ''
+               CPABORT('restart file "'//TRIM(ADJUSTL(filename))//'" not found')
+            ELSE
+               file_tmr = filename
             END IF
          END IF
+
+         ! Hamiltonian restart file
+         IF (PRESENT(file_hab)) THEN
+            print_key => section_vals_get_subs_vals(ec_sec, &
+                                                    'PRINT%HAMILTONIAN')
+            filename = cp_print_key_generate_filename(logger, print_key, &
+                                                      middle_name='RESTART', extension='.hab', my_local=.FALSE.)
+            INQUIRE (FILE=filename, exist=ok)
+            IF (.NOT. ok) THEN
+               CPABORT('restart file "'//TRIM(ADJUSTL(filename))//'" not found')
+            ELSE
+               file_hab = filename
+            END IF
+         END IF
+
+         ! MO restart file
+         IF (PRESENT(file_wfn)) THEN
+            print_key => section_vals_get_subs_vals(ec_sec, &
+                                                    'PRINT%WAVEFUNCTION')
+            filename = cp_print_key_generate_filename(logger, print_key, &
+                                                      middle_name='RESTART', extension='.wfn', my_local=.FALSE.)
+            INQUIRE (FILE=filename, exist=ok)
+            IF (.NOT. ok) THEN
+               CPABORT('restart file "'//TRIM(ADJUSTL(filename))//'" not found')
+            ELSE
+               file_wfn = filename
+            END IF
+         END IF
+
       END IF
-
-      ! Check whether there is enough data to restart from
-      IF (restart .and. .not.bk .and. &
-          (file_tmf == '' .or. file_tmr == '') .and. &
-          (file_hab == '' .or. file_wfn == '')) THEN
-         restart = .FALSE.
-      END IF
-
-      ! Hamiltonian blocks
-      IF (PRESENT(blocks)) &
-        blocks = bk
-
-      ! Running time
-      CALL timestop(handle)
 
    END FUNCTION pod_check_restart
 

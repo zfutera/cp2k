@@ -25,6 +25,8 @@ MODULE qs_energy_utils
                                               dbcsr_set
    USE et_coupling,                     ONLY: calc_et_coupling
    USE et_coupling_pod,                 ONLY: pod_coupling_calc
+   USE hartree_local_methods,           ONLY: Vh_1c_gg_integrals
+   USE hartree_local_types,             ONLY: ecoul_1center_type
    USE input_section_types,             ONLY: section_vals_get,&
                                               section_vals_get_subs_vals,&
                                               section_vals_type
