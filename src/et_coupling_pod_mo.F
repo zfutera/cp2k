@@ -23,9 +23,11 @@ MODULE et_coupling_pod_mo
                                               cp_fm_set_all,&
                                               cp_fm_type,&
                                               cp_fm_vectorssum
+   USE cp_gemm_interface,               ONLY: cp_gemm
    USE cp_log_handling,                 ONLY: cp_logger_type
    USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
                                               cp_print_key_unit_nr
+   USE cp_para_types,                   ONLY: cp_para_env_type
    USE cp_realspace_grid_cube,          ONLY: cp_pw_to_cube
    USE dbcsr_api,                       ONLY: dbcsr_p_type
    USE et_coupling_pod_types,           ONLY: et_cpl,&
@@ -35,8 +37,6 @@ MODULE et_coupling_pod_mo
    USE kinds,                           ONLY: default_path_length,&
                                               default_string_length,&
                                               dp
-   USE message_passing,                 ONLY: mp_para_env_type
-   USE parallel_gemm_api,               ONLY: parallel_gemm
    USE particle_list_types,             ONLY: particle_list_type
    USE particle_types,                  ONLY: particle_type
    USE pw_env_types,                    ONLY: pw_env_get,&
@@ -49,7 +49,7 @@ MODULE et_coupling_pod_mo
                                               REALDATA3D,&
                                               REALSPACE,&
                                               RECIPROCALSPACE,&
-                                              pw_type
+                                              pw_p_type
    USE qs_collocate_density,            ONLY: calculate_wavefunction
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
@@ -90,27 +90,28 @@ CONTAINS
       TYPE(mo_set_type), POINTER                         :: mo
       INTEGER                                            :: n_ao, n_mo
 
-      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_mo_norm', routineP = moduleN//':'//routineN
 
-      ! Local variables
-      INTEGER                                            :: handle
       REAL(KIND=dp), DIMENSION(:), POINTER               :: vec_t
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(cp_fm_type)                                   :: mat_sc, mat_t
-      TYPE(mp_para_env_type), POINTER                    :: para_env
+      TYPE(cp_fm_type), POINTER                          :: mat_sc, mat_t
+      TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mat_s
+
+! Routine name for debug purposes
+! Local variables
+
+! Routine name for debug purposes
 
       ! Initialization
       NULLIFY (blacs_env)
       NULLIFY (para_env)
       NULLIFY (fm_s)
       NULLIFY (mat_s)
+      NULLIFY (mat_sc)
+      NULLIFY (mat_t)
       NULLIFY (vec_t)
-
-      ! Time mark
-      CALL timeset(routineN, handle)
 
       ! Overlap matrix
       CALL get_qs_env(qs_env, matrix_s=mat_s)
@@ -126,7 +127,7 @@ CONTAINS
                                nrow_global=n_mo, ncol_global=n_mo)
       CALL cp_fm_create(matrix=mat_t, matrix_struct=fm_s, &
                         name='C^T*S*C OVERLAP PRODUCT MATRIX')
-      CALL parallel_gemm('T', 'N', n_mo, n_mo, n_ao, 1.0_dp, mo%mo_coeff, mat_sc, 0.0_dp, mat_t)
+      CALL cp_gemm('T', 'N', n_mo, n_mo, n_ao, 1.0_dp, mo%mo_coeff, mat_sc, 0.0_dp, mat_t)
 
       ! Normalization
       ALLOCATE (vec_t(n_mo))
@@ -141,9 +142,6 @@ CONTAINS
       CALL cp_fm_release(matrix=mat_t)
       IF (ASSOCIATED(vec_t)) &
          DEALLOCATE (vec_t)
-
-      ! Running time
-      CALL timestop(handle)
 
    END SUBROUTINE pod_mo_norm
 
@@ -167,7 +165,7 @@ CONTAINS
       TYPE(et_cpl), POINTER                              :: ec
       INTEGER                                            :: id
       TYPE(mo_set_type), POINTER                         :: mo
-      TYPE(cp_fm_type)                                   :: mat_u
+      TYPE(cp_fm_type), POINTER                          :: mat_u
       INTEGER                                            :: n_ao
       INTEGER                                            :: n_mo
 
@@ -176,10 +174,10 @@ CONTAINS
                                      routineP = moduleN//':'//routineN
 
       ! Local variables
-      INTEGER                                            :: ir, ic, jr, jc, nr, nc, handle
+      INTEGER                                            :: ir, ic, jr, jc, nr, nc
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
-      TYPE(cp_fm_type)                                   :: mat_w
-      TYPE(mp_para_env_type), POINTER                    :: para_env
+      TYPE(cp_fm_type), POINTER                          :: mat_w
+      TYPE(cp_para_env_type), POINTER                    :: para_env
 #if defined(__SCALAPACK)
       INTEGER                                            :: is_p_row, is_p_col
       INTEGER                                            :: iu_p_row, iu_p_col
@@ -188,12 +186,7 @@ CONTAINS
       INTEGER                                            :: cs_row, cs_col, cu_row, cu_col
       INTEGER                                            :: cs_row_f, cs_col_f, cu_row_f, cu_col_f
       REAL(KIND=dp)                                      :: xu
-#endif
 
-      ! Time mark
-      CALL timeset(routineN, handle)
-
-#if defined(__SCALAPACK)
       ! number of processors
       ns_p_rows = mo%mo_coeff%matrix_struct%context%num_pe(1)
       ns_p_cols = mo%mo_coeff%matrix_struct%context%num_pe(2)
@@ -209,6 +202,7 @@ CONTAINS
 
       NULLIFY (blacs_env)
       NULLIFY (para_env)
+      NULLIFY (mat_w)
 
       ! Working matrix
       CALL cp_fm_create(matrix=mat_w, matrix_struct=mo%mo_coeff%matrix_struct, &
@@ -235,14 +229,14 @@ CONTAINS
                   ! Local U element
                   IF ((cu_row_f == cu_row) .AND. (cu_col_f == cu_col)) THEN
                      xu = mat_u%local_data(iu_p_row, iu_p_col)
-                     CALL mat_u%matrix_struct%context%dgebs2d('All', ' ', 1, 1, xu, 1)
+                     CALL dgebs2d(mat_u%matrix_struct%context%group, 'All', ' ', 1, 1, xu, 1)
                      IF ((cs_row_f == cs_row) .AND. (cs_col_f == cs_col)) THEN
                         mat_w%local_data(is_p_row, is_p_col) = xu
                      END IF
                      ! Remote U element
                   ELSE
-                     CALL mat_u%matrix_struct%context%dgebr2d('All', ' ', 1, 1, xu, 1, &
-                             cu_row_f, cu_col_f)
+                     CALL dgebr2d(mat_u%matrix_struct%context%group, &
+                                  'All', ' ', 1, 1, xu, 1, cu_row_f, cu_col_f)
                      IF ((cs_row_f == cs_row) .AND. (cs_col_f == cs_col)) THEN
                         mat_w%local_data(is_p_row, is_p_col) = xu
                      END IF
@@ -259,14 +253,11 @@ CONTAINS
       END DO
 
       ! Transformation to original non-orthogonal basis set
-      CALL parallel_gemm("N", "N", n_ao, n_mo, n_ao, 1.0_dp, ec%tmatf, mat_w, 0.0_dp, mo%mo_coeff)
+      CALL cp_gemm("N", "N", n_ao, n_mo, n_ao, 1.0_dp, ec%tmatf, mat_w, 0.0_dp, mo%mo_coeff)
       CALL pod_mo_norm(qs_env, mo, n_ao, n_mo)
 
       ! Clean memory
       CALL cp_fm_release(matrix=mat_w)
-
-      ! Running time
-      CALL timestop(handle)
 
    END SUBROUTINE pod_mo_set_coeffs
 
@@ -286,24 +277,24 @@ CONTAINS
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_cpl), POINTER                              :: ec
       INTEGER                                            :: id, spin
-      TYPE(cp_fm_type)                                   :: mat_u
+      TYPE(cp_fm_type), POINTER                          :: mat_u
       REAL(KIND=dp), DIMENSION(:), POINTER               :: vec_e
 
-      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_mo_set', routineP = moduleN//':'//routineN
 
-      ! Local variables
-      INTEGER                                            :: n_ao, n_el, n_mo, handle
+      INTEGER                                            :: n_ao, n_el, n_mo
       REAL(KIND=dp)                                      :: mx_occ
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(mp_para_env_type), POINTER                    :: para_env
+      TYPE(cp_para_env_type), POINTER                    :: para_env
       TYPE(dft_control_type), POINTER                    :: dft_cntrl
       TYPE(mo_set_type), POINTER                         :: mo
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(scf_control_type), POINTER                    :: scf_cntrl
 
-      ! Pointer initialization
+! Routine name for debug purposes
+! Local variables
+
       NULLIFY (blacs_env)
       NULLIFY (fm_s)
       NULLIFY (para_env)
@@ -311,9 +302,6 @@ CONTAINS
       NULLIFY (mo)
       NULLIFY (qs_kind_set)
       NULLIFY (scf_cntrl)
-
-      ! Time mark
-      CALL timeset(routineN, handle)
 
       ! Number of basis functions
       CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set)
@@ -343,8 +331,9 @@ CONTAINS
       END IF
 
       ! Memory allocation
-      CALL allocate_mo_set(ec%block(id)%mo(spin), n_ao, n_mo, n_el, REAL(n_el, dp), mx_occ, 0.0_dp)
-      mo => ec%block(id)%mo(spin)
+      NULLIFY (ec%block(id)%mo(spin)%mo_set)
+      CALL allocate_mo_set(ec%block(id)%mo(spin)%mo_set, n_ao, n_mo, n_el, REAL(n_el, dp), mx_occ, 0.0_dp)
+      mo => ec%block(id)%mo(spin)%mo_set
 
       ! State energies
       NULLIFY (mo%eigenvalues)
@@ -356,8 +345,6 @@ CONTAINS
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
       CALL cp_fm_struct_create(fmstruct=fm_s, para_env=para_env, context=blacs_env, &
                                nrow_global=n_ao, ncol_global=n_mo)
-      NULLIFY(mo%mo_coeff)
-      ALLOCATE(mo%mo_coeff)
       CALL cp_fm_create(matrix=mo%mo_coeff, matrix_struct=fm_s, name='BLOCK STATES')
 
       ! Transform MO coefficients to original non-orthogonal basis set
@@ -376,9 +363,6 @@ CONTAINS
 
       ! Clean memory
       CALL cp_fm_struct_release(fmstruct=fm_s)
-
-      ! Running time
-      CALL timestop(handle)
 
    END SUBROUTINE pod_mo_set
 
@@ -402,24 +386,25 @@ CONTAINS
       TYPE(mo_set_type), POINTER                         :: mo
       INTEGER                                            :: ib, im, is
 
-      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_mo_save', routineP = moduleN//':'//routineN
 
-      ! Local variables
       CHARACTER(LEN=default_path_length)                 :: filename
       CHARACTER(LEN=default_string_length)               :: title
-      INTEGER                                            :: unit_nr, handle
+      INTEGER                                            :: unit_nr
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cell_type), POINTER                           :: cell
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(particle_list_type), POINTER                  :: particles
       TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(pw_env_type), POINTER                         :: pw_env
-      TYPE(pw_type)                                      :: wf_g, wf_r
+      TYPE(pw_p_type)                                    :: wf_g, wf_r
       TYPE(pw_pool_p_type), DIMENSION(:), POINTER        :: pw_pools
       TYPE(pw_pool_type), POINTER                        :: auxbas_pw_pool
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_subsys_type), POINTER                      :: subsys
+
+! Routine name for debug purposes
+! Local variables
 
       ! Initialization
       NULLIFY (particles)
@@ -434,9 +419,6 @@ CONTAINS
       NULLIFY (dft_control)
       NULLIFY (particle_set)
       NULLIFY (qs_kind_set)
-
-      ! Time mark
-      CALL timeset(routineN, handle)
 
       ! Name of the cube file
       WRITE (filename, '(A7,I1.1,A1,I5.5,A1,I1.1)') 'POD-MO_', ib, '_', im, '_', is
@@ -454,9 +436,9 @@ CONTAINS
       ! Grids for wavefunction
       CALL get_qs_env(qs_env, pw_env=pw_env)
       CALL pw_env_get(pw_env, auxbas_pw_pool=auxbas_pw_pool, pw_pools=pw_pools)
-      CALL pw_pool_create_pw(auxbas_pw_pool, wf_r, &
+      CALL pw_pool_create_pw(auxbas_pw_pool, wf_r%pw, &
                              use_data=REALDATA3D, in_space=REALSPACE)
-      CALL pw_pool_create_pw(auxbas_pw_pool, wf_g, &
+      CALL pw_pool_create_pw(auxbas_pw_pool, wf_g%pw, &
                              use_data=COMPLEXDATA1D, in_space=RECIPROCALSPACE)
 
       ! Calculate the grid values
@@ -464,18 +446,15 @@ CONTAINS
                       cell=cell, dft_control=dft_control, particle_set=particle_set)
       CALL calculate_wavefunction(mo%mo_coeff, im, wf_r, wf_g, atomic_kind_set, &
                                   qs_kind_set, cell, dft_control, particle_set, pw_env)
-      CALL cp_pw_to_cube(wf_r, unit_nr, title, particles=particles, &
+      CALL cp_pw_to_cube(wf_r%pw, unit_nr, title, particles=particles, &
                          stride=section_get_ivals(input, 'MO_CUBES%STRIDE'))
 
       ! Close file
       CALL cp_print_key_finished_output(unit_nr, logger, input, 'MO_CUBES')
 
       ! Clean memory
-      CALL pw_pool_give_back_pw(auxbas_pw_pool, wf_r)
-      CALL pw_pool_give_back_pw(auxbas_pw_pool, wf_g)
-
-      ! Running time
-      CALL timestop(handle)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, wf_r%pw)
+      CALL pw_pool_give_back_pw(auxbas_pw_pool, wf_g%pw)
 
    END SUBROUTINE pod_mo_save
 
@@ -494,7 +473,7 @@ CONTAINS
 
       ! Routine arguments
       TYPE(et_cpl_atom), DIMENSION(:), POINTER           :: blk_at
-      TYPE(cp_fm_type)                                   :: mo
+      TYPE(cp_fm_type), POINTER                          :: mo
       INTEGER                                            :: id
       INTEGER, DIMENSION(:), POINTER                     :: atom
 
@@ -507,18 +486,13 @@ CONTAINS
 
       ! Local variables
       LOGICAL                                            :: found
-      INTEGER                                            :: i, j, k, handle
+      INTEGER                                            :: i, j, k
       REAL(KIND=dp)                                      :: c
 #if defined(__SCALAPACK)
       INTEGER                                            :: c_row, c_col, c_row_f, c_col_f
       INTEGER                                            :: i_p_row, i_p_col
       INTEGER                                            :: n_p_rows, n_p_cols
-#endif
 
-      ! Time mark
-      CALL timeset(routineN, handle)
-
-#if defined(__SCALAPACK)
       ! number of processors
       n_p_rows = mo%matrix_struct%context%num_pe(1)
       n_p_cols = mo%matrix_struct%context%num_pe(2)
@@ -556,11 +530,10 @@ CONTAINS
             ! local element
             IF ((c_row_f == c_row) .AND. (c_col_f == c_col)) THEN
                c = mo%local_data(i_p_row, i_p_col)
-               CALL mo%matrix_struct%context%dgebs2d('All', ' ', 1, 1, c, 1)
+               CALL dgebs2d(mo%matrix_struct%context%group, 'All', ' ', 1, 1, c, 1)
                ! remote element
             ELSE
-               CALL mo%matrix_struct%context%dgebr2d('All', ' ', 1, 1, c, 1, &
-                      c_row_f, c_col_f)
+               CALL dgebr2d(mo%matrix_struct%context%group, 'All', ' ', 1, 1, c, 1, c_row_f, c_col_f)
             END IF
 #else
             c = mo%local_data(blk_at(j)%ao_pos + k - 1, id)
@@ -569,9 +542,6 @@ CONTAINS
          END DO
 
       END DO
-
-      ! Running time
-      CALL timestop(handle)
 
    END FUNCTION pod_mo_sum_c2
 
