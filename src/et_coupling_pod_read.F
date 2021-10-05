@@ -17,13 +17,9 @@ MODULE et_coupling_pod_read
                                               cp_fm_struct_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
                                               cp_fm_read_unformatted,&
-                                              cp_fm_p_type,&
                                               cp_fm_type
    USE cp_para_types,                   ONLY: cp_para_env_type
-   USE et_coupling_pod_core,            ONLY: pod_block_diag,&
-                                              pod_block_hamiltonian
    USE et_coupling_pod_types,           ONLY: et_cpl
-   USE et_coupling_pod_utils,           ONLY: pod_get_transf_mat
    USE kinds,                           ONLY: default_path_length,&
                                               dp
    USE qs_environment_types,            ONLY: get_qs_env,&
@@ -62,15 +58,13 @@ CONTAINS
       CHARACTER(LEN=*)                                   :: desc
       CHARACTER(LEN=default_path_length)                 :: filename
 
-      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_read_restart_tmat', &
          routineP = moduleN//':'//routineN
 
-      ! Local variables
-      INTEGER                                            :: unit_nr, handle
+      INTEGER                                            :: unit_nr
 
-      ! Time mark
-      CALL timeset(routineN, handle)
+! Routine name for debug purposes
+! Local variables
 
       ! Memory allocation
       CALL cp_fm_create(matrix=mat, matrix_struct=fm_s, &
@@ -89,9 +83,6 @@ CONTAINS
       ! Close the file
       IF (unit_nr > 0) &
          CALL close_file(unit_nr)
-
-      ! Running time
-      CALL timestop(handle)
 
    END SUBROUTINE pod_read_restart_tmat
 
@@ -112,13 +103,11 @@ CONTAINS
       INTEGER                                            :: ns
       CHARACTER(LEN=default_path_length)                 :: file_hab, file_wfn
 
-      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_read_restart_cpl', &
          routineP = moduleN//':'//routineN
 
-      ! Local variables
       INTEGER                                            :: i, id, j, k, n_ao, n_blocks, n_el, n_mo, &
-                                                            n_spins, unit_hab, unit_wfn, handle
+                                                            n_spins, unit_hab, unit_wfn
       INTEGER, DIMENSION(:), POINTER                     :: vi
       REAL(KIND=dp)                                      :: mx_occ
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
@@ -128,6 +117,9 @@ CONTAINS
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(scf_control_type), POINTER                    :: scf_cntrl
 
+! Routine name for debug purposes
+! Local variables
+
       ! Initialization
       NULLIFY (blacs_env)
       NULLIFY (fm_s)
@@ -136,9 +128,6 @@ CONTAINS
       NULLIFY (qs_kind_set)
       NULLIFY (scf_cntrl)
       NULLIFY (vi)
-
-      ! Time mark
-      CALL timeset(routineN, handle)
 
       ! Number of basis functions
       CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set)
@@ -303,95 +292,41 @@ CONTAINS
       IF (unit_wfn > 0) &
          CALL close_file(unit_wfn)
 
-      ! Running time
-      CALL timestop(handle)
-
    END SUBROUTINE pod_read_restart_cpl
 
 ! **************************************************************************************************
 !> \brief read POD Hamiltonian and MOs from binary restart file
-!> \param output_unit unit number of the open output stream
 !> \param qs_env QuickStep environment containing all system data
 !> \param ec electronic coupling data structure
 !> \param n_spins number of spin components
 !> \param fm_s full-matrix structure used for allocation of transformation matrices
-!> \param mat_w working matrix of the same dimension
-!> \param n_ao total number of AO basis functions
 !> \param file_tmf name of the forward-transformation-matrix restart file
 !> \param file_tmr name of the reverse-transformation-matrix restart file
 !> \param file_hab name of the Hamiltonian restart file
 !> \param file_wfn name of the wavefunction restart file
-!> \param blocks separate Hamiltonian blocks
 !> \author Z. Futera (03.2019)
 ! **************************************************************************************************
-   SUBROUTINE pod_read_restart_data(output_unit, qs_env, ec, n_spins, fm_s, mat_w, n_ao, &
-                                    file_tmf, file_tmr, file_hab, file_wfn, blocks)
+   SUBROUTINE pod_read_restart_data(qs_env, ec, n_spins, fm_s, file_tmf, file_tmr, file_hab, file_wfn)
 
       ! Routine arguments
-      INTEGER                                            :: output_unit
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_cpl), POINTER                              :: ec
       INTEGER                                            :: n_spins
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(cp_fm_type), POINTER                          :: mat_w
-      INTEGER                                            :: n_ao
       CHARACTER(LEN=default_path_length)                 :: file_tmf, file_tmr, file_hab, file_wfn
-      LOGICAL                                            :: blocks
 
-      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_read_restart_data', &
          routineP = moduleN//':'//routineN
 
-      ! Local variables
-      INTEGER                                            :: handle
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_h
+! Routine name for debug purposes
 
-      ! Pointer initialization
-      NULLIFY (mat_h)
+      ! Forward transformation matrix
+      CALL pod_read_restart_tmat(ec%tmatf, fm_s, 'S^(-1/2)', file_tmf)
+      ! Reverse transformation matrix
+      CALL pod_read_restart_tmat(ec%tmatr, fm_s, 'S^(+1/2)', file_tmr)
 
-      ! Time mark
-      CALL timeset(routineN, handle)
-
-      ! Transformation matrices for Lowdin orthogonalization
-      IF (file_tmf /= '' .and. file_tmr /= '') THEN
-
-         ! Read the matrices from TMF and TMR restart files
-         CALL pod_read_restart_tmat(ec%tmatf, fm_s, 'S^(-1/2)', file_tmf)
-         CALL pod_read_restart_tmat(ec%tmatr, fm_s, 'S^(+1/2)', file_tmr)
-
-      ELSE
-
-         ! Calculate the matrix elements from the overlap matrix
-         CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
-
-      END IF
-
-      ! Hamiltonian blocks
-      IF (blocks) THEN
-
-         CALL pod_block_diag(output_unit, qs_env, ec, mat_h, n_spins, .TRUE., blocks)
-
-      ! Full Hamiltonian
-      ELSE
-
-         ! Coupling elements and wavefunctions
-         IF (file_hab /= '' .and. file_wfn /= '') THEN
- 
-            ! Read data from HAB and WFN restart files
-            CALL pod_read_restart_cpl(qs_env, ec, n_spins, file_hab, file_wfn)
- 
-         ELSE
- 
-            ! Calculate data from KS Hamiltonian
-            CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, n_ao, n_spins)
-            CALL pod_block_diag(output_unit, qs_env, ec, mat_h, n_spins, .TRUE., blocks)
- 
-         END IF
-
-      END IF
-
-      ! Running time
-      CALL timestop(handle)
+      ! Coupling elements and wavefunctions
+      CALL pod_read_restart_cpl(qs_env, ec, n_spins, file_hab, file_wfn)
 
    END SUBROUTINE pod_read_restart_data
 
