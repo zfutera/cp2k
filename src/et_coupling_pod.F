@@ -85,7 +85,6 @@ CONTAINS
       ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_set_fermi', routineP = moduleN//':'//routineN
 
-
       NULLIFY (ec%fermi)
 
       IF (PRESENT(fb)) THEN
