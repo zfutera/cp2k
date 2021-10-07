@@ -69,8 +69,7 @@ CONTAINS
                                      routineP = moduleN//':'//routineN
 
       ! Local variables
-      INTEGER                                            :: i
-      INTEGER                                            :: n_deps
+      INTEGER                                            :: i, n_deps, handle
       REAL(KIND=dp)                                      :: f
       REAL(KIND=dp), DIMENSION(:), ALLOCATABLE           :: et, ei
       TYPE(cp_fm_type), POINTER                          :: mat_u
@@ -84,7 +83,12 @@ CONTAINS
       INTEGER                                            :: n_p_row, n_p_col
       INTEGER                                            :: p_row_0, p_col_0
       INTEGER                                            :: p_row_i, p_col_i
+#endif
 
+      ! Time mark
+      CALL timeset(routineN, handle)
+
+#if defined(__SCALAPACK)
       ! Number of rows/columns in Scalapack blocks
       n_b_row = mat_w%matrix_struct%nrow_block
       n_b_col = mat_w%matrix_struct%ncol_block
@@ -227,6 +231,9 @@ CONTAINS
       DEALLOCATE (et)
       DEALLOCATE (ei)
 
+      ! Running time
+      CALL timestop(handle)
+
    END SUBROUTINE pod_get_transf_mat
 
 ! **************************************************************************************************
@@ -255,9 +262,12 @@ CONTAINS
 
       ! Local variables
       CHARACTER(LEN=default_path_length)                 :: filename
+      INTEGER                                            :: handle
       LOGICAL                                            :: ok
       TYPE(section_vals_type), POINTER                   :: print_key
 
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! check whether user wants to use data from the restart files
       restart = section_get_lval(ec_sec, 'RESTART')
@@ -329,6 +339,9 @@ CONTAINS
             restart = .FALSE.
 
       END IF
+
+      ! Running time
+      CALL timestop(handle)
 
    END FUNCTION pod_check_restart
 

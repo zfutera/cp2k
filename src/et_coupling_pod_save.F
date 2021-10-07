@@ -59,19 +59,22 @@ CONTAINS
       INTEGER                                            :: n_spins
       INTEGER, INTENT(OUT)                               :: unit_nr
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_save_coupl_header', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: i
+      ! Local variables
+      INTEGER                                            :: i, handle
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(section_vals_type), POINTER                   :: print_key
 
-! Routine name for debug purposes
-! Local variables
 
       ! Initialization
       NULLIFY (logger)
       NULLIFY (print_key)
+
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Output settings
       logger => cp_get_default_logger()
@@ -96,6 +99,9 @@ CONTAINS
 
       END IF
 
+      ! Running time
+      CALL timestop(handle)
+
    END SUBROUTINE pod_save_coupl_header
 
 ! **************************************************************************************************
@@ -112,13 +118,15 @@ CONTAINS
       TYPE(et_cpl), POINTER                              :: ec
       INTEGER                                            :: ib, is, unit_nr
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_save_coupl_states', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: i
+      ! Local variables
+      INTEGER                                            :: i, handle
 
-! Routine name for debug purposes
-! Local variables
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       IF (unit_nr > 0) THEN
 
@@ -129,6 +137,9 @@ CONTAINS
          FLUSH (unit_nr)
 
       END IF
+
+      ! Running time
+      CALL timestop(handle)
 
    END SUBROUTINE pod_save_coupl_states
 
@@ -147,16 +158,24 @@ CONTAINS
       TYPE(et_cpl), POINTER                              :: ec
       INTEGER                                            :: i1, i2, is, unit_nr
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_save_coupl_elements', &
          routineP = moduleN//':'//routineN
 
-! Routine name for debug purposes
+      ! Local variables
+      INTEGER                                            :: handle
+
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Save data to file
       CALL cp_fm_write_unformatted(ec%block(i1)%hab(is, i2)%matrix, unit_nr)
 
       IF (unit_nr > 0) &
          FLUSH (unit_nr)
+
+      ! Running time
+      CALL timestop(handle)
 
    END SUBROUTINE pod_save_coupl_elements
 
@@ -172,18 +191,21 @@ CONTAINS
       TYPE(qs_environment_type), POINTER                 :: qs_env
       INTEGER, INTENT(OUT)                               :: unit_nr
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_save_coupl_close', &
          routineP = moduleN//':'//routineN
 
+      ! Local variables
+      INTEGER                                            :: handle
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(section_vals_type), POINTER                   :: print_key
-
-! Routine name for debug purposes
-! Local variables
 
       ! Initialization
       NULLIFY (logger)
       NULLIFY (print_key)
+
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Output settings
       logger => cp_get_default_logger()
@@ -192,6 +214,9 @@ CONTAINS
 
       ! Close the file
       CALL cp_print_key_finished_output(unit_nr, logger, print_key, 'HAMILTONIAN')
+
+      ! Running time
+      CALL timestop(handle)
 
    END SUBROUTINE pod_save_coupl_close
 
@@ -209,22 +234,25 @@ CONTAINS
       TYPE(et_cpl), POINTER                              :: ec
       INTEGER                                            :: n_spins
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_save_state_cube', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: i, j, k, l, n
+      ! Local variables
+      INTEGER                                            :: i, j, k, l, n, handle
       INTEGER, DIMENSION(:), POINTER                     :: list
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(mo_set_type), POINTER                         :: mo
       TYPE(section_vals_type), POINTER                   :: block_sec, mo_sec, print_sec
 
-! Routine name for debug purposes
-! Local variables
-
+      ! Initialization
       NULLIFY (logger)
       NULLIFY (block_sec)
       NULLIFY (print_sec)
       NULLIFY (mo_sec)
+
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Output logger
       logger => cp_get_default_logger()
@@ -292,6 +320,9 @@ CONTAINS
 
       END DO
 
+      ! Running time
+      CALL timestop(handle)
+
    END SUBROUTINE pod_save_state_cube
 
 ! **************************************************************************************************
@@ -310,19 +341,21 @@ CONTAINS
       INTEGER                                            :: n_spins
       INTEGER, INTENT(OUT)                               :: unit_nr
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_save_state_header', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: i
+      ! Local variables
+      INTEGER                                            :: i, handle
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(section_vals_type), POINTER                   :: print_key
-
-! Routine name for debug purposes
-! Local variables
 
       ! Initialization
       NULLIFY (logger)
       NULLIFY (print_key)
+
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Output settings
       logger => cp_get_default_logger()
@@ -347,6 +380,9 @@ CONTAINS
 
       END IF
 
+      ! Running time
+      CALL timestop(handle)
+
    END SUBROUTINE pod_save_state_header
 
 ! **************************************************************************************************
@@ -363,16 +399,24 @@ CONTAINS
       TYPE(et_cpl), POINTER                              :: ec
       INTEGER                                            :: ib, is, unit_nr
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_save_state_coeffs', &
          routineP = moduleN//':'//routineN
 
-! Routine name for debug purposes
+      ! Local variables
+      INTEGER                                            :: handle
+
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Save data to file
       CALL cp_fm_write_unformatted(ec%block(ib)%mo(is)%mo_set%mo_coeff, unit_nr)
 
       IF (unit_nr > 0) &
          FLUSH (unit_nr)
+
+      ! Running time
+      CALL timestop(handle)
 
    END SUBROUTINE pod_save_state_coeffs
 
@@ -388,18 +432,21 @@ CONTAINS
       TYPE(qs_environment_type), POINTER                 :: qs_env
       INTEGER, INTENT(OUT)                               :: unit_nr
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_save_state_close', &
          routineP = moduleN//':'//routineN
 
+      ! Local variables
+      INTEGER                                            :: handle
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(section_vals_type), POINTER                   :: print_key
-
-! Routine name for debug purposes
-! Local variables
 
       ! Initialization
       NULLIFY (logger)
       NULLIFY (print_key)
+
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Output settings
       logger => cp_get_default_logger()
@@ -408,6 +455,9 @@ CONTAINS
 
       ! Close the file
       CALL cp_print_key_finished_output(unit_nr, logger, print_key, 'WAVEFUNCTION')
+
+      ! Running time
+      CALL timestop(handle)
 
    END SUBROUTINE pod_save_state_close
 
@@ -425,19 +475,21 @@ CONTAINS
       TYPE(et_cpl), POINTER                              :: ec
       CHARACTER                                          :: key
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_save_transf_mat', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: unit_nr
+      ! Local variables
+      INTEGER                                            :: unit_nr, handle
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(section_vals_type), POINTER                   :: print_key
-
-! Routine name for debug purposes
-! Local variables
 
       ! Initialization
       NULLIFY (logger)
       NULLIFY (print_key)
+
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Output settings
       logger => cp_get_default_logger()
@@ -467,6 +519,9 @@ CONTAINS
          CALL cp_print_key_finished_output(unit_nr, logger, print_key, 'TRANSF_MATRIX_R')
 
       END IF
+
+      ! Running time
+      CALL timestop(handle)
 
    END SUBROUTINE pod_save_transf_mat
 
