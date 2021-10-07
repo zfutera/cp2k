@@ -82,9 +82,9 @@ CONTAINS
       REAL(KIND=dp)                                      :: fa
       REAL(KIND=dp), OPTIONAL                            :: fb
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_set_fermi', routineP = moduleN//':'//routineN
 
-! Routine name for debug purposes
 
       NULLIFY (ec%fermi)
 
@@ -119,9 +119,11 @@ CONTAINS
       TYPE(section_vals_type), POINTER                   :: et_proj_sec
       TYPE(et_cpl), POINTER                              :: ec
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_block_init', routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: i, j, k, l, n, n_ao, n_atoms, n_set
+      ! Local variables
+      INTEGER                                            :: i, j, k, l, n, n_ao, n_atoms, n_set, handle
       INTEGER, DIMENSION(:), POINTER                     :: atom_id, atom_nf, atom_ps, n_shell, t
       INTEGER, DIMENSION(:, :), POINTER                  :: ang_mom_id
       TYPE(gto_basis_set_type), POINTER                  :: ao_basis_set
@@ -129,9 +131,10 @@ CONTAINS
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(section_vals_type), POINTER                   :: block_sec
 
-! Routine name for debug purposes
-! Local variables
+      ! Time mark
+      CALL timeset(routineN, handle)
 
+      ! Initialization
       NULLIFY (ang_mom_id)
       NULLIFY (ao_basis_set)
       NULLIFY (atom_id)
@@ -270,6 +273,9 @@ CONTAINS
       IF (ASSOCIATED(t)) &
          DEALLOCATE (t)
 
+      ! Running time
+      CALL timestop(handle)
+
    END SUBROUTINE pod_block_init
 
 ! **************************************************************************************************
@@ -289,7 +295,7 @@ CONTAINS
 
       ! Local variables
       CHARACTER(LEN=default_path_length)                 :: file_hab, file_tmf, file_tmr, file_wfn
-      INTEGER                                            :: i, j, k, n_ao, n_atoms, output_unit
+      INTEGER                                            :: i, j, k, n_ao, n_atoms, output_unit, handle
       LOGICAL                                            :: do_kp, restart
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_h
@@ -320,6 +326,9 @@ CONTAINS
       NULLIFY (mat_w)
 
       NULLIFY (ec)
+
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Reference
       CALL cite_reference(Futera2017)
@@ -592,6 +601,9 @@ CONTAINS
 
       ! Close output stream
       CALL cp_print_key_finished_output(output_unit, logger, et_proj_sec, 'PROGRAM_RUN_INFO')
+
+      ! Running time
+      CALL timestop(handle)
 
    END SUBROUTINE pod_coupling_calc
 
