@@ -237,20 +237,20 @@ CONTAINS
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(section_vals_type), POINTER                   :: ec_sec
       CHARACTER(LEN=default_path_length), OPTIONAL       :: file_tmf, file_tmr, file_hab, file_wfn
+      ! Returning value
       LOGICAL                                            :: restart
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_check_restart', &
          routineP = moduleN//':'//routineN
 
+      ! Local variables
       CHARACTER(LEN=default_path_length)                 :: filename
       LOGICAL                                            :: ok
       TYPE(section_vals_type), POINTER                   :: print_key
 
-! Returning value
-! Routine name for debug purposes
-! Local variables
 
-      ! restart
+      ! check whether user wants to use data from the restart files
       restart = section_get_lval(ec_sec, 'RESTART')
 
       IF (restart) THEN
@@ -262,8 +262,9 @@ CONTAINS
             filename = cp_print_key_generate_filename(logger, print_key, &
                                                       middle_name='RESTART', extension='.tmf', my_local=.FALSE.)
             INQUIRE (FILE=filename, exist=ok)
+            file_tmf = ''
             IF (.NOT. ok) THEN
-               CPABORT('restart file "'//TRIM(ADJUSTL(filename))//'" not found')
+               CPWARN('restart file "'//TRIM(ADJUSTL(filename))//'" not found')
             ELSE
                file_tmf = filename
             END IF
@@ -274,10 +275,11 @@ CONTAINS
             print_key => section_vals_get_subs_vals(ec_sec, &
                                                     'PRINT%TRANSF_MATRIX_R')
             filename = cp_print_key_generate_filename(logger, print_key, &
-                                                      middle_name='RESTART', extension='.tmf', my_local=.FALSE.)
+                                                      middle_name='RESTART', extension='.tmr', my_local=.FALSE.)
             INQUIRE (FILE=filename, exist=ok)
+            file_tmr = ''
             IF (.NOT. ok) THEN
-               CPABORT('restart file "'//TRIM(ADJUSTL(filename))//'" not found')
+               CPWARN('restart file "'//TRIM(ADJUSTL(filename))//'" not found')
             ELSE
                file_tmr = filename
             END IF
@@ -290,8 +292,9 @@ CONTAINS
             filename = cp_print_key_generate_filename(logger, print_key, &
                                                       middle_name='RESTART', extension='.hab', my_local=.FALSE.)
             INQUIRE (FILE=filename, exist=ok)
+            file_hab = ''
             IF (.NOT. ok) THEN
-               CPABORT('restart file "'//TRIM(ADJUSTL(filename))//'" not found')
+               CPWARN('restart file "'//TRIM(ADJUSTL(filename))//'" not found')
             ELSE
                file_hab = filename
             END IF
@@ -304,12 +307,17 @@ CONTAINS
             filename = cp_print_key_generate_filename(logger, print_key, &
                                                       middle_name='RESTART', extension='.wfn', my_local=.FALSE.)
             INQUIRE (FILE=filename, exist=ok)
+            file_wfn = ''
             IF (.NOT. ok) THEN
-               CPABORT('restart file "'//TRIM(ADJUSTL(filename))//'" not found')
+               CPWARN('restart file "'//TRIM(ADJUSTL(filename))//'" not found')
             ELSE
                file_wfn = filename
             END IF
          END IF
+
+         ! check whether there is enough data to restart from
+         IF ((file_tmf == '' .or. file_tmr == '') .and. (file_hab == '' .or. file_wfn == '')) & 
+            restart = .FALSE.
 
       END IF
 
