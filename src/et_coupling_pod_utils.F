@@ -13,6 +13,7 @@ MODULE et_coupling_pod_utils
    USE cp_fm_basic_linalg,              ONLY: cp_fm_syrk,&
                                               cp_fm_upper_to_full
    USE cp_fm_diag,                      ONLY: choose_eigv_solver
+   USE cp_fm_struct,                    ONLY: cp_fm_struct_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
                                               cp_fm_release,&
                                               cp_fm_to_fm,&
@@ -48,16 +49,18 @@ CONTAINS
 !> \param output_unit unit number of the open output stream
 !> \param qs_env QuickStep environment containing all system data
 !> \param ec electronic coupling data structure
+!> \param fm_s full-matrix structure used for allocation of transformation matrices
 !> \param mat_w working matrix of the same dimension
 !> \param n_ao number of atomic orbitLals (dimension of S matrix)
 !> \author Z. Futera (02.2017)
 ! **************************************************************************************************
-   SUBROUTINE pod_get_transf_mat(output_unit, qs_env, ec, mat_w, n_ao)
+   SUBROUTINE pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
 
       ! Routine arguments
       INTEGER                                            :: output_unit
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_cpl), POINTER                              :: ec
+      TYPE(cp_fm_struct_type), POINTER                   :: fm_s
       TYPE(cp_fm_type), POINTER                          :: mat_w
       INTEGER                                            :: n_ao
 
@@ -105,6 +108,12 @@ CONTAINS
       ALLOCATE (ei(n_ao))
       et(:) = 0.0_dp
       ei(:) = 0.0_dp
+
+      ! Allocate memory for the transformation matrices
+      CALL cp_fm_create(matrix=ec%tmatf, matrix_struct=fm_s, &
+                        name='S^(-1/2) TRANSFORMATION MATRIX')
+      CALL cp_fm_create(matrix=ec%tmatr, matrix_struct=fm_s, &
+                        name='S^(+1/2) TRANSFORMATION MATRIX')
 
       ! Diagonalization of S
       CALL get_qs_env(qs_env, matrix_s=mat_s)
