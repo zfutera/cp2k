@@ -67,7 +67,10 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       ! Local variables
-      INTEGER                                            :: unit_nr
+      INTEGER                                            :: unit_nr, handle
+
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Memory allocation
       CALL cp_fm_create(matrix=mat, matrix_struct=fm_s, &
@@ -86,6 +89,9 @@ CONTAINS
       ! Close the file
       IF (unit_nr > 0) &
          CALL close_file(unit_nr)
+
+      ! Running time
+      CALL timestop(handle)
 
    END SUBROUTINE pod_read_restart_tmat
 
@@ -112,7 +118,7 @@ CONTAINS
 
       ! Local variables
       INTEGER                                            :: i, id, j, k, n_ao, n_blocks, n_el, n_mo, &
-                                                            n_spins, unit_hab, unit_wfn
+                                                            n_spins, unit_hab, unit_wfn, handle
       INTEGER, DIMENSION(:), POINTER                     :: vi
       REAL(KIND=dp)                                      :: mx_occ
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
@@ -130,6 +136,9 @@ CONTAINS
       NULLIFY (qs_kind_set)
       NULLIFY (scf_cntrl)
       NULLIFY (vi)
+
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Number of basis functions
       CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set)
@@ -294,6 +303,9 @@ CONTAINS
       IF (unit_wfn > 0) &
          CALL close_file(unit_wfn)
 
+      ! Running time
+      CALL timestop(handle)
+
    END SUBROUTINE pod_read_restart_cpl
 
 ! **************************************************************************************************
@@ -329,10 +341,14 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       ! Local variables
+      INTEGER                                            :: handle
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_h
 
       ! Pointer initialization
       NULLIFY (mat_h)
+
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Transformation matrices for Lowdin orthogonalization
       IF (file_tmf /= '' .and. file_tmr /= '') THEN
@@ -361,6 +377,9 @@ CONTAINS
          CALL pod_block_diag(qs_env, ec, mat_h)
 
       END IF
+
+      ! Running time
+      CALL timestop(handle)
 
    END SUBROUTINE pod_read_restart_data
 
