@@ -342,6 +342,9 @@ CONTAINS
 
       END IF
 
+      ! Time mark
+      CALL timeset(routineN, handle)
+
       ! Parallel environment
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
 
