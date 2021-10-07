@@ -327,6 +327,10 @@ CONTAINS
          IF ((file_tmf == '' .or. file_tmr == '') .and. (file_hab == '' .or. file_wfn == '')) & 
             restart = .FALSE.
 
+         ! check whether there is enough data to restart from
+         IF ((file_tmf == '' .or. file_tmr == '') .and. (file_hab == '' .or. file_wfn == '')) & 
+            restart = .FALSE.
+
       END IF
 
       ! MO restart file
