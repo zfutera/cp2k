@@ -86,13 +86,13 @@ CONTAINS
       ! Routine arguments
       TYPE(et_cpl), POINTER                              :: ec
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_data_release', &
          routineP = moduleN//':'//routineN
 
+      ! Local variables
       INTEGER                                            :: i, j, k
 
-! Routine name for debug purposes
-! Local variables
 
       IF (ASSOCIATED(ec)) THEN
 

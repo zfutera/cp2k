@@ -72,14 +72,19 @@ CONTAINS
                                      routineP = moduleN//':'//routineN
 
       ! Local variables
-      INTEGER                                            :: ir, ic, jr, jc, kr, kc, nr, nc
+      INTEGER                                            :: ir, ic, jr, jc, kr, kc, nr, nc, handle
 #if defined(__SCALAPACK)
       INTEGER                                            :: iw_p_row, iw_p_col, ih_p_row, ih_p_col
       INTEGER                                            :: nw_p_rows, nw_p_cols, nh_p_rows, nh_p_cols
       INTEGER                                            :: cw_row, cw_col, ch_row, ch_col
       INTEGER                                            :: cw_row_f, cw_col_f, ch_row_f, ch_col_f
       REAL(KIND=dp)                                      :: xh
+#endif
 
+      ! Time mark
+      CALL timeset(routineN, handle)
+
+#if defined(__SCALAPACK)
       IF (.NOT. cp_fm_struct_equivalent(mat_h%matrix_struct, mat_w%matrix_struct)) &
          CPABORT('cannot reorder Hamiltonian, working-matrix structure is not equivalent')
 
@@ -149,6 +154,9 @@ CONTAINS
       ! Copy the reordered matrix to original data array
       CALL cp_fm_to_fm(mat_w, mat_h)
 
+      ! Running time
+      CALL timestop(handle)
+
    END SUBROUTINE pod_block_projection
 
 ! **************************************************************************************************
@@ -179,10 +187,14 @@ CONTAINS
          routineP = moduleN//':'//routineN
 
       ! Local variables
-      INTEGER                                            :: i
+      INTEGER                                            :: i, handle
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mat_h
 
+      ! Pointer initialization
       NULLIFY (mat_h)
+
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Memory allocation
       ALLOCATE (mat_t(n_spins))
@@ -209,6 +221,9 @@ CONTAINS
 
       END DO
 
+      ! Running time
+      CALL timestop(handle)
+
    END SUBROUTINE pod_block_hamiltonian
 
 ! **************************************************************************************************
@@ -230,7 +245,7 @@ CONTAINS
 
       ! Local variables
       INTEGER                                            :: i, id, j, k, l, n_spins, spin, unit_hab, &
-                                                            unit_wfn
+                                                            unit_wfn, handle
       REAL(KIND=dp), DIMENSION(:), POINTER               :: vec_e
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: dat
@@ -245,6 +260,9 @@ CONTAINS
       NULLIFY (fm_s)
       NULLIFY (mat_u)
       NULLIFY (para_env)
+
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Parallel environment
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
@@ -401,6 +419,9 @@ CONTAINS
          IF (ASSOCIATED(mat_h)) &
             DEALLOCATE (mat_h)
       END IF
+
+      ! Running time
+      CALL timestop(handle)
 
    END SUBROUTINE pod_block_diag
 
