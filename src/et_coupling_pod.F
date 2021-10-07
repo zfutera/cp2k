@@ -767,14 +767,18 @@ CONTAINS
          IF (restart) THEN
             WRITE (output_unit, '(/,T3,A)') &
                'POD data are read from restart files'
-            WRITE (output_unit, '(T3,A,A)') &
-               'Forward transformation matrix      = ', TRIM(ADJUSTL(file_tmf))
-            WRITE (output_unit, '(T3,A,A)') &
-               'Reverse transformation matrix      = ', TRIM(ADJUSTL(file_tmr))
-            WRITE (output_unit, '(T3,A,A)') &
-               'Hamiltonian data file              = ', TRIM(ADJUSTL(file_hab))
-            WRITE (output_unit, '(T3,A,A)') &
-               'Wavefunction data file             = ', TRIM(ADJUSTL(file_wfn))
+            IF (file_tmf /= '') &
+               WRITE (output_unit, '(T3,A,A)') &
+                  'Forward transformation matrix      = ', TRIM(ADJUSTL(file_tmf))
+            IF (file_tmr /= '') &
+               WRITE (output_unit, '(T3,A,A)') &
+                  'Reverse transformation matrix      = ', TRIM(ADJUSTL(file_tmr))
+            IF (file_hab /= '') &
+               WRITE (output_unit, '(T3,A,A)') &
+                  'Hamiltonian data file              = ', TRIM(ADJUSTL(file_hab))
+            IF (file_wfn /= '') &
+               WRITE (output_unit, '(T3,A,A)') &
+                  'Wavefunction data file             = ', TRIM(ADJUSTL(file_wfn))
          END IF
 
       END IF
