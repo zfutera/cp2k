@@ -66,18 +66,20 @@ CONTAINS
       TYPE(et_cpl), POINTER                              :: ec
       INTEGER                                            :: blk, n_spins
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_print_state_fracs', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: j, k, l, m, n, n_ao, n_mo
+      ! Local variables
+      INTEGER                                            :: j, k, l, m, n, n_ao, n_mo, handle
       INTEGER, DIMENSION(:), POINTER                     :: list_at, list_mo
       REAL(KIND=dp)                                      :: c1, c2
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_w
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(section_vals_type), POINTER                   :: block_sec, print_sec
 
-! Routine name for debug purposes
-! Local variables
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       ! Initialization
       NULLIFY (block_sec)
@@ -171,6 +173,9 @@ CONTAINS
 
       END IF
 
+      ! Running time
+      CALL timestop(handle)
+
    END SUBROUTINE pod_print_state_fracs
 
 ! **************************************************************************************************
@@ -194,14 +199,16 @@ CONTAINS
       INTEGER, OPTIONAL                                  :: mx_mo_a, mx_mo_b
       LOGICAL, OPTIONAL                                  :: fermi
 
+      ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_print_states', &
          routineP = moduleN//':'//routineN
 
-      INTEGER                                            :: i, mx_a, mx_b, n
+      ! Local variables
+      INTEGER                                            :: i, mx_a, mx_b, n, handle
       LOGICAL                                            :: prnt_fm
 
-! Routine name for debug purposes
-! Local variables
+      ! Time mark
+      CALL timeset(routineN, handle)
 
       prnt_fm = .FALSE.
       IF (PRESENT(fermi)) &
@@ -266,6 +273,9 @@ CONTAINS
 
       END IF
 
+      ! Running time
+      CALL timestop(handle)
+
    END SUBROUTINE pod_print_states
 
 ! **************************************************************************************************
@@ -294,7 +304,7 @@ CONTAINS
 
       ! Local variables
       LOGICAL                                            :: do_print
-      INTEGER                                            :: i, j, k, l, id
+      INTEGER                                            :: i, j, k, l, id, handle
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(section_vals_type), POINTER                   :: et_proj_sec, print_key
 #if defined(__SCALAPACK)
@@ -311,7 +321,12 @@ CONTAINS
       TYPE(cp_fm_type), POINTER                          :: m1, m2
 
       INTEGER, EXTERNAL                                  :: numroc
+#endif
 
+      ! Time mark
+      CALL timeset(routineN, handle)
+
+#if defined(__SCALAPACK)
       NULLIFY (m1)
       NULLIFY (m2)
       NULLIFY (d1)
@@ -321,7 +336,6 @@ CONTAINS
 
       tg1 = 0
       tg2 = 0
-
 #endif
 
       ! Initialization
@@ -525,6 +539,9 @@ CONTAINS
 #endif
 
       END IF
+
+      ! Running time
+      CALL timestop(handle)
 
    END SUBROUTINE pod_print_couplings
 
