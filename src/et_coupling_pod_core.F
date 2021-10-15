@@ -405,6 +405,8 @@ CONTAINS
          logger => cp_get_default_logger()
          print_sec => section_vals_get_subs_vals(qs_env%input, &
                          'PROPERTIES%ET_COUPLING%PROJECTION%PRINT')
+         block_sec => section_vals_get_subs_vals(qs_env%input, &
+                         'PROPERTIES%ET_COUPLING%PROJECTION%BLOCK')
       END IF
 
       ! Parallel environment
