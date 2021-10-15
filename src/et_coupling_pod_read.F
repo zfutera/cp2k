@@ -373,8 +373,8 @@ CONTAINS
       ELSE
 
          ! Calculate data from KS Hamiltonian
-         CALL pod_block_hamiltonian(output_unit, qs_env, ec, fm_s, mat_h, mat_w, n_ao, n_spins)
-         CALL pod_block_diag(qs_env, ec, mat_h)
+         CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, n_ao, n_spins)
+         CALL pod_block_diag(qs_env, ec, mat_h, .FALSE.)
 
       END IF
 
