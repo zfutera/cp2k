@@ -40,7 +40,8 @@ MODULE et_coupling_pod_core
                                               pod_save_state_header
    USE et_coupling_pod_types,           ONLY: et_cpl
    USE input_section_types,             ONLY: section_vals_get_subs_vals,&
-                                              section_vals_type
+                                              section_vals_type,&
+                                              section_vals_val_get
    USE kinds,                           ONLY: default_path_length,&
                                               dp
    USE kpoint_types,                    ONLY: kpoint_type
@@ -253,6 +254,7 @@ CONTAINS
 
       ! Local variables
       CHARACTER(LEN=default_path_length)                 :: filename
+      LOGICAL                                            :: skip_i, skip_j
       INTEGER                                            :: i, id, j, k, l, n_spins, spin, unit_hab, &
                                                             unit_wfn, unit_hbk, handle
       REAL(KIND=dp), DIMENSION(:), POINTER               :: vec_e
@@ -262,11 +264,12 @@ CONTAINS
       TYPE(cp_fm_type), POINTER                          :: mat_u
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(cp_para_env_type), POINTER                    :: para_env
-      TYPE(section_vals_type), POINTER                   :: print_sec
+      TYPE(section_vals_type), POINTER                   :: block_sec, print_sec
 
       ! Pointer initialization
       NULLIFY (vec_e)
       NULLIFY (blacs_env)
+      NULLIFY (block_sec)
       NULLIFY (dat)
       NULLIFY (fm_s)
       NULLIFY (logger)
@@ -282,6 +285,8 @@ CONTAINS
          logger => cp_get_default_logger()
          print_sec => section_vals_get_subs_vals(qs_env%input, &
                          'PROPERTIES%ET_COUPLING%PROJECTION%PRINT')
+         block_sec => section_vals_get_subs_vals(qs_env%input, &
+                         'PROPERTIES%ET_COUPLING%PROJECTION%BLOCK')
       END IF
 
       ! Parallel environment
@@ -342,18 +347,20 @@ CONTAINS
             ! Save block to file only
             IF (blocks) THEN
 
-              ! open the file
-              WRITE (filename, '(A8,I1.1,A1,I1.1,A1,I1.1)') 'RESTART_', i, '-', i, '_', spin
-              unit_hbk = cp_print_key_unit_nr(logger, print_sec, 'HAMILTONIAN', &
-                            extension='.hbk', middle_name=TRIM(filename), file_form='UNFORMATTED', &
-                            file_position='REWIND', file_action='WRITE', file_status='REPLACE', &
-                            log_filename=.FALSE.)
+              CALL section_vals_val_get(block_sec, keyword_name='SKIP', l_val=skip_i, i_rep_section=i)
 
-              ! Save the block elements
-              CALL cp_fm_write_unformatted(dat(i)%matrix, unit_hbk)
-
-              ! Close the file
-              CALL cp_print_key_finished_output(unit_hbk, logger, print_sec, 'HAMILTONIAN')
+              IF (.NOT. skip_i) THEN
+                 ! open the file
+                 WRITE (filename, '(A8,I1.1,A1,I1.1,A1,I1.1)') 'RESTART_', i, '-', i, '_', spin
+                 unit_hbk = cp_print_key_unit_nr(logger, print_sec, 'HAMILTONIAN', &
+                               extension='.hbk', middle_name=TRIM(filename), file_form='UNFORMATTED', &
+                               file_position='REWIND', file_action='WRITE', file_status='REPLACE', &
+                               log_filename=.FALSE.)
+                 ! Save the block elements
+                 CALL cp_fm_write_unformatted(dat(i)%matrix, unit_hbk)
+                 ! Close the file
+                 CALL cp_print_key_finished_output(unit_hbk, logger, print_sec, 'HAMILTONIAN')
+              END IF
 
             ! Energy calculation
             ELSE
@@ -415,18 +422,21 @@ CONTAINS
                   ! Save block to file only
                   IF (blocks) THEN
 
-                     ! open the file
-                     WRITE (filename, '(A8,I1.1,A1,I1.1,A1,I1.1)') 'RESTART_', i, '-', j, '_', spin
-                     unit_hbk = cp_print_key_unit_nr(logger, print_sec, 'HAMILTONIAN', &
-                                   extension='.hbk', middle_name=TRIM(filename), file_form='UNFORMATTED', &
-                                   file_position='REWIND', file_action='WRITE', file_status='REPLACE', &
-                                   log_filename=.FALSE.)
-   
-                     ! Save the block elements
-                     CALL cp_fm_write_unformatted(ec%block(i)%hab(spin, id)%matrix, unit_hbk)
-   
-                     ! Close the file
-                     CALL cp_print_key_finished_output(unit_hbk, logger, print_sec, 'HAMILTONIAN')
+                     CALL section_vals_val_get(block_sec, keyword_name='SKIP', l_val=skip_i, i_rep_section=i)
+                     CALL section_vals_val_get(block_sec, keyword_name='SKIP', l_val=skip_j, i_rep_section=j)
+
+                     IF (.NOT. skip_i .AND. .NOT. skip_j) THEN
+                        ! open the file
+                        WRITE (filename, '(A8,I1.1,A1,I1.1,A1,I1.1)') 'RESTART_', i, '-', j, '_', spin
+                        unit_hbk = cp_print_key_unit_nr(logger, print_sec, 'HAMILTONIAN', &
+                                      extension='.hbk', middle_name=TRIM(filename), file_form='UNFORMATTED', &
+                                      file_position='REWIND', file_action='WRITE', file_status='REPLACE', &
+                                      log_filename=.FALSE.)
+                        ! Save the block elements
+                        CALL cp_fm_write_unformatted(ec%block(i)%hab(spin, id)%matrix, unit_hbk)
+                        ! Close the file
+                        CALL cp_print_key_finished_output(unit_hbk, logger, print_sec, 'HAMILTONIAN')
+                     END IF
 
                   ! Transformation
                   ELSE
