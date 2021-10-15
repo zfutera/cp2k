@@ -296,7 +296,7 @@ CONTAINS
       ! Local variables
       CHARACTER(LEN=default_path_length)                 :: file_hab, file_tmf, file_tmr, file_wfn
       INTEGER                                            :: i, j, k, n_ao, n_atoms, output_unit, handle
-      LOGICAL                                            :: do_kp, restart
+      LOGICAL                                            :: do_kp, restart, blocks_only
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_h
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
@@ -342,7 +342,8 @@ CONTAINS
                                          'PROGRAM_RUN_INFO', extension='.log')
 
       ! Restart from data files
-      restart = pod_check_restart(logger, et_proj_sec, file_tmf, file_tmr, file_hab, file_wfn)
+      restart = pod_check_restart(logger, et_proj_sec, &
+                   file_tmf, file_tmr, file_hab, file_wfn, blocks_only)
 
       ! Header
       IF (output_unit > 0) THEN
@@ -489,9 +490,10 @@ CONTAINS
                ! Lowdin transformation matrices
                CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
                ! KS Hamiltonian
-               CALL pod_block_hamiltonian(output_unit, qs_env, ec, fm_s, mat_h, mat_w, n_ao, 2)
+               CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
+                                          n_ao, dft_cntrl%nspins)
                ! Block diagonization
-               CALL pod_block_diag(qs_env, ec, mat_h)
+               CALL pod_block_diag(qs_env, ec, mat_h, blocks_only)
 
             END IF
 
@@ -562,26 +564,29 @@ CONTAINS
                ! Lowdin transformation matrices
                CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
                ! KS Hamiltonian
-               CALL pod_block_hamiltonian(output_unit, qs_env, ec, fm_s, mat_h, mat_w, n_ao, 1)
+               CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
+                                          n_ao, dft_cntrl%nspins)
                ! Block diagonization
-               CALL pod_block_diag(qs_env, ec, mat_h)
+               CALL pod_block_diag(qs_env, ec, mat_h, blocks_only)
 
             END IF
 
-            ! Print out energies and couplings
-            DO i = 1, ec%n_blocks
-               IF (output_unit > 0) THEN
-                  CALL pod_print_states(output_unit, ec%block(i)%mo, dft_cntrl%nspins, &
-                                        'block '//TRIM(ADJUSTL(cp_to_string(i)))//' states', &
-                                        mx_mo_a=mo(1)%mo_set%nmo, fermi=.TRUE.)
-               END IF
-               CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
-            END DO
-
-            CALL pod_print_couplings(output_unit, qs_env, ec, mo(1)%mo_set%nmo)
-
-            ! Save electronic states
-            CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
+            IF (.NOT. blocks_only) THEN
+               ! Print out energies and couplings
+               DO i = 1, ec%n_blocks
+                  IF (output_unit > 0) THEN
+                     CALL pod_print_states(output_unit, ec%block(i)%mo, dft_cntrl%nspins, &
+                                           'block '//TRIM(ADJUSTL(cp_to_string(i)))//' states', &
+                                           mx_mo_a=mo(1)%mo_set%nmo, fermi=.TRUE.)
+                  END IF
+                  CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
+               END DO
+ 
+               CALL pod_print_couplings(output_unit, qs_env, ec, mo(1)%mo_set%nmo)
+ 
+               ! Save electronic states
+               CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
+            END IF
 
             !<----------------------------------------------------------------------------->!
 
