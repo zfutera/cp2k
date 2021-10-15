@@ -1277,6 +1277,14 @@ CONTAINS
                                        description="Save elements of POD Hamiltonian to binary file", &
                                        filename="POD")
       CALL section_add_subsection(section_print, print_key)
+
+      ! PROJECTION -> PRINT -> HAMILTONIAN -> BLOCKS_ONLY
+      CALL keyword_create(keyword, __LOCATION__, name='BLOCKS_ONLY', &
+                          description="Separate files for individual POD blocks", &
+                          usage="BLOCKS_ONLY {logical}", default_l_val=.FALSE.)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
       CALL section_release(print_key)
 
       ! PROJECTION -> PRINT -> WAVEFUNCTION
@@ -1327,6 +1335,13 @@ CONTAINS
       CALL keyword_create(keyword, __LOCATION__, name='NELECTRON', &
                           description="Number of electrons expected in the system part", &
                           usage="NELECTRON {integer}", default_i_val=0)
+      CALL section_add_keyword(section_block, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> BLOCK -> SKIP
+      CALL keyword_create(keyword, __LOCATION__, name='SKIP', &
+                          description="Skip operations related to indivial POD block", &
+                          usage="SKIP {logical}", default_l_val=.FALSE.)
       CALL section_add_keyword(section_block, keyword)
       CALL keyword_release(keyword)
 
