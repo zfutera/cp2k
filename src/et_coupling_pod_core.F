@@ -345,6 +345,13 @@ CONTAINS
       ! Time mark
       CALL timeset(routineN, handle)
 
+      ! Output logger
+      IF (blocks) THEN
+         logger => cp_get_default_logger()
+         print_sec => section_vals_get_subs_vals(qs_env%input, &
+                         'PROPERTIES%ET_COUPLING%PROJECTION%PRINT')
+      END IF
+
       ! Parallel environment
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
 
