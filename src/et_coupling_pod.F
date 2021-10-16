@@ -593,6 +593,9 @@ CONTAINS
             ! Save electronic states
             CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
 
+            ! Save electronic states
+            CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
+
             !<----------------------------------------------------------------------------->!
 
          END IF
