@@ -482,7 +482,8 @@ CONTAINS
 
                ! Hamiltonian & wavefunction
                CALL pod_read_restart_data(output_unit, qs_env, ec, dft_cntrl%nspins, fm_s, &
-                                          mat_w, n_ao, file_tmf, file_tmr, file_hab, file_wfn)
+                                          mat_w, n_ao, file_tmf, file_tmr, file_hab, file_wfn, &
+                                          blocks_only)
 
                ! POD calculation
             ELSE
@@ -493,7 +494,7 @@ CONTAINS
                CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
                                           n_ao, dft_cntrl%nspins)
                ! Block diagonization
-               CALL pod_block_diag(qs_env, ec, mat_h, blocks_only)
+               CALL pod_block_diag(output_unit, qs_env, ec, mat_h, restart, blocks_only)
 
             END IF
 
@@ -556,7 +557,8 @@ CONTAINS
 
                ! Hamiltonian & wavefunction
                CALL pod_read_restart_data(output_unit, qs_env, ec, dft_cntrl%nspins, fm_s, &
-                                          mat_w, n_ao, file_tmf, file_tmr, file_hab, file_wfn)
+                                          mat_w, n_ao, file_tmf, file_tmr, file_hab, file_wfn, &
+                                          blocks_only)
 
                ! POD calculation
             ELSE
@@ -567,26 +569,27 @@ CONTAINS
                CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
                                           n_ao, dft_cntrl%nspins)
                ! Block diagonization
-               CALL pod_block_diag(qs_env, ec, mat_h, blocks_only)
+               CALL pod_block_diag(output_unit, qs_env, ec, mat_h, restart, blocks_only)
 
             END IF
 
+            ! Print out energies 
+            DO i = 1, ec%n_blocks
+               IF (ASSOCIATED(ec%block(i)%mo(1)%mo_set) .AND. output_unit > 0) THEN
+                  CALL pod_print_states(output_unit, ec%block(i)%mo, dft_cntrl%nspins, &
+                                        'block '//TRIM(ADJUSTL(cp_to_string(i)))//' states', &
+                                        mx_mo_a=mo(1)%mo_set%nmo, fermi=.TRUE.)
+               END IF
+               CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
+            END DO
+
+            ! Print out coupling elements
             IF (.NOT. blocks_only) THEN
-               ! Print out energies and couplings
-               DO i = 1, ec%n_blocks
-                  IF (output_unit > 0) THEN
-                     CALL pod_print_states(output_unit, ec%block(i)%mo, dft_cntrl%nspins, &
-                                           'block '//TRIM(ADJUSTL(cp_to_string(i)))//' states', &
-                                           mx_mo_a=mo(1)%mo_set%nmo, fermi=.TRUE.)
-                  END IF
-                  CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
-               END DO
- 
                CALL pod_print_couplings(output_unit, qs_env, ec, mo(1)%mo_set%nmo)
- 
-               ! Save electronic states
-               CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
             END IF
+
+            ! Save electronic states
+            CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
 
             !<----------------------------------------------------------------------------->!
 
