@@ -262,59 +262,63 @@ CONTAINS
       ! Print states of all blocks
       DO i = 1, ec%n_blocks
 
-         print_sec => section_vals_get_subs_vals(block_sec, 'PRINT', i_rep_section=i)
+         IF (ASSOCIATED(ec%block(i)%mo(1)%mo_set)) THEN
 
-         ! Check if the print input section is active
-         IF (BTEST(cp_print_key_should_output(logger%iter_info, &
-                                              print_sec, 'MO_CUBES'), cp_p_file)) THEN
-
-            mo_sec => section_vals_get_subs_vals(print_sec, 'MO_CUBES')
-
-            ! Spin states
-            DO j = 1, n_spins
-
-               mo => ec%block(i)%mo(j)%mo_set
-
-               CALL section_vals_val_get(mo_sec, keyword_name='MO_LIST', n_rep_val=n)
-
-               ! List of specific MOs
-               IF (n > 0) THEN
-
-                  DO k = 1, n
-                     NULLIFY (list)
-                     CALL section_vals_val_get(mo_sec, keyword_name='MO_LIST', &
-                                               i_rep_val=k, i_vals=list)
-                     IF (ASSOCIATED(list)) THEN
-                        DO l = 1, SIZE(list)
-                           CALL pod_mo_save(qs_env, logger, print_sec, mo, i, list(l), j)
+            print_sec => section_vals_get_subs_vals(block_sec, 'PRINT', i_rep_section=i)
+ 
+            ! Check if the print input section is active
+            IF (BTEST(cp_print_key_should_output(logger%iter_info, &
+                                                 print_sec, 'MO_CUBES'), cp_p_file)) THEN
+ 
+               mo_sec => section_vals_get_subs_vals(print_sec, 'MO_CUBES')
+ 
+               ! Spin states
+               DO j = 1, n_spins
+ 
+                  mo => ec%block(i)%mo(j)%mo_set
+ 
+                  CALL section_vals_val_get(mo_sec, keyword_name='MO_LIST', n_rep_val=n)
+ 
+                  ! List of specific MOs
+                  IF (n > 0) THEN
+ 
+                     DO k = 1, n
+                        NULLIFY (list)
+                        CALL section_vals_val_get(mo_sec, keyword_name='MO_LIST', &
+                                                  i_rep_val=k, i_vals=list)
+                        IF (ASSOCIATED(list)) THEN
+                           DO l = 1, SIZE(list)
+                              CALL pod_mo_save(qs_env, logger, print_sec, mo, i, list(l), j)
+                           END DO
+                        END IF
+                     END DO
+ 
+                     ! Frontier MOs
+                  ELSE
+ 
+                     ! Occupied states
+                     CALL section_vals_val_get(mo_sec, keyword_name='NHOMO', i_val=n)
+ 
+                     IF (n > 0) THEN
+                        DO k = MAX(1, mo%homo - n + 1), mo%homo
+                           CALL pod_mo_save(qs_env, logger, print_sec, mo, i, k, j)
                         END DO
                      END IF
-                  END DO
-
-                  ! Frontier MOs
-               ELSE
-
-                  ! Occupied states
-                  CALL section_vals_val_get(mo_sec, keyword_name='NHOMO', i_val=n)
-
-                  IF (n > 0) THEN
-                     DO k = MAX(1, mo%homo - n + 1), mo%homo
-                        CALL pod_mo_save(qs_env, logger, print_sec, mo, i, k, j)
-                     END DO
+ 
+                     ! Unoccupied states
+                     CALL section_vals_val_get(mo_sec, keyword_name='NLUMO', i_val=n)
+ 
+                     IF (n > 0) THEN
+                        DO k = mo%lfomo, MIN(mo%lfomo + n - 1, mo%nmo)
+                           CALL pod_mo_save(qs_env, logger, print_sec, mo, i, k, j)
+                        END DO
+                     END IF
+ 
                   END IF
-
-                  ! Unoccupied states
-                  CALL section_vals_val_get(mo_sec, keyword_name='NLUMO', i_val=n)
-
-                  IF (n > 0) THEN
-                     DO k = mo%lfomo, MIN(mo%lfomo + n - 1, mo%nmo)
-                        CALL pod_mo_save(qs_env, logger, print_sec, mo, i, k, j)
-                     END DO
-                  END IF
-
-               END IF
-
-            END DO
+ 
+               END DO
+ 
+            END IF
 
          END IF
 

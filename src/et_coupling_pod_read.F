@@ -321,10 +321,11 @@ CONTAINS
 !> \param file_tmr name of the reverse-transformation-matrix restart file
 !> \param file_hab name of the Hamiltonian restart file
 !> \param file_wfn name of the wavefunction restart file
+!> \param blocks separate Hamiltonian blocks
 !> \author Z. Futera (03.2019)
 ! **************************************************************************************************
    SUBROUTINE pod_read_restart_data(output_unit, qs_env, ec, n_spins, fm_s, mat_w, n_ao, &
-                                    file_tmf, file_tmr, file_hab, file_wfn)
+                                    file_tmf, file_tmr, file_hab, file_wfn, blocks)
 
       ! Routine arguments
       INTEGER                                            :: output_unit
@@ -335,6 +336,7 @@ CONTAINS
       TYPE(cp_fm_type), POINTER                          :: mat_w
       INTEGER                                            :: n_ao
       CHARACTER(LEN=default_path_length)                 :: file_tmf, file_tmr, file_hab, file_wfn
+      LOGICAL                                            :: blocks
 
       ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_read_restart_data', &
@@ -364,17 +366,27 @@ CONTAINS
 
       END IF
 
-      ! Coupling elements and wavefunctions
-      IF (file_hab /= '' .and. file_wfn /= '') THEN
+      ! Hamiltonian blocks
+      IF (blocks) THEN
 
-         ! Read data from HAB and WFN restart files
-         CALL pod_read_restart_cpl(qs_env, ec, n_spins, file_hab, file_wfn)
+         CALL pod_block_diag(output_unit, qs_env, ec, mat_h, .TRUE., blocks)
 
+      ! Full Hamiltonian
       ELSE
 
-         ! Calculate data from KS Hamiltonian
-         CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, n_ao, n_spins)
-         CALL pod_block_diag(qs_env, ec, mat_h, .FALSE.)
+         ! Coupling elements and wavefunctions
+         IF (file_hab /= '' .and. file_wfn /= '') THEN
+ 
+            ! Read data from HAB and WFN restart files
+            CALL pod_read_restart_cpl(qs_env, ec, n_spins, file_hab, file_wfn)
+ 
+         ELSE
+ 
+            ! Calculate data from KS Hamiltonian
+            CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, n_ao, n_spins)
+            CALL pod_block_diag(output_unit, qs_env, ec, mat_h, .TRUE., blocks)
+ 
+         END IF
 
       END IF
 
