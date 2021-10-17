@@ -362,132 +362,136 @@ CONTAINS
             id = 1
             DO j = i + 1, ec%n_blocks
 
-               ! Matrix pointers
-               m1 => ec%block(i)%hab(1, id)%matrix
-               IF (SIZE(ec%block(i)%hab, 1) > 1) &
-                  m2 => ec%block(i)%hab(2, id)%matrix
-               ! Total number of rows/columns
-               n_t_row = m1%matrix_struct%nrow_global
-               n_t_col = m1%matrix_struct%ncol_global
-               ! Number of rows/columns in Scalapack blocks
-               n_b_row = m1%matrix_struct%nrow_block
-               n_b_col = m1%matrix_struct%ncol_block
-
-               ! Context and descriptor
-               cntxt_loc = m1%matrix_struct%para_env%group
-               CALL cp_blacs_gridinit(cntxt_loc, 'R', 1, m1%matrix_struct%para_env%num_pe)
-               CALL cp_blacs_gridinfo(cntxt_loc, n_p_row, n_p_col, p_row_i, p_col_i)
-               CALL descinit(desc, n_t_row, n_t_col, n_b_row, n_t_col, 0, 0, cntxt_loc, n_t_row, info)
-               CPASSERT(info == 0)
-
-               ! Number of rows on the actual processor
-               n = numroc(n_t_row, n_b_row, p_row_i, 0, n_p_row)
-
-               ! Local data arrays
-               ALLOCATE (d1(MAX(1, n), n_t_col))
-               ALLOCATE (v1(n_b_row*n_t_col))
-               v1 = HUGE(1.0_dp)
-               IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
-                  ALLOCATE (d2(MAX(1, n), n_t_col))
-                  ALLOCATE (v2(n_b_row*n_t_col))
-                  v2 = HUGE(1.0_dp)
-               END IF
-
-               ! Get the matrix elements
-               CALL pdgemr2d(n_t_row, n_t_col, m1%local_data(1, 1), 1, 1, &
-                             m1%matrix_struct%descriptor, &
-                             d1(1, 1), 1, 1, desc, cntxt_loc)
-               IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
-                  CALL pdgemr2d(n_t_row, n_t_col, m2%local_data(1, 1), 1, 1, &
-                                m2%matrix_struct%descriptor, &
-                                d2(1, 1), 1, 1, desc, cntxt_loc)
-               END IF
-
-               ! Row / column index
-               k = 1
-               l = 1
-
-               ! Loop over blocks of rows
-               DO ir = 1, n_t_row, MAX(n_b_row, 1)
-
-                  ! Number of rows in the block
-                  ib = MIN(n_b_row, n_t_row - ir + 1)
-
-                  ! Local element position
-                  CALL infog2l(ir, 1, desc, n_p_row, n_p_col, p_row_i, p_col_i, &
-                               ir_loc, ic_loc, p_row_0, p_col_0)
-
-                  ! Save block-row columns
-                  IF (p_row_0 == p_row_i) THEN
-                     DO ix = 1, ib
-                        v1((ix - 1)*n_t_col + 1:n_t_col*ix) = d1(ir_loc + ix - 1, :)
-                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
-                           v2((ix - 1)*n_t_col + 1:n_t_col*ix) = d2(ir_loc + ix - 1, :)
-                     END DO
+               IF (ASSOCIATED(ec%block(i)%hab(1,id)%matrix)) THEN
+   
+                  ! Matrix pointers
+                  m1 => ec%block(i)%hab(1, id)%matrix
+                  IF (SIZE(ec%block(i)%hab, 1) > 1) &
+                     m2 => ec%block(i)%hab(2, id)%matrix
+                  ! Total number of rows/columns
+                  n_t_row = m1%matrix_struct%nrow_global
+                  n_t_col = m1%matrix_struct%ncol_global
+                  ! Number of rows/columns in Scalapack blocks
+                  n_b_row = m1%matrix_struct%nrow_block
+                  n_b_col = m1%matrix_struct%ncol_block
+   
+                  ! Context and descriptor
+                  cntxt_loc = m1%matrix_struct%para_env%group
+                  CALL cp_blacs_gridinit(cntxt_loc, 'R', 1, m1%matrix_struct%para_env%num_pe)
+                  CALL cp_blacs_gridinfo(cntxt_loc, n_p_row, n_p_col, p_row_i, p_col_i)
+                  CALL descinit(desc, n_t_row, n_t_col, n_b_row, n_t_col, 0, 0, cntxt_loc, n_t_row, info)
+                  CPASSERT(info == 0)
+   
+                  ! Number of rows on the actual processor
+                  n = numroc(n_t_row, n_b_row, p_row_i, 0, n_p_row)
+   
+                  ! Local data arrays
+                  ALLOCATE (d1(MAX(1, n), n_t_col))
+                  ALLOCATE (v1(n_b_row*n_t_col))
+                  v1 = HUGE(1.0_dp)
+                  IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
+                     ALLOCATE (d2(MAX(1, n), n_t_col))
+                     ALLOCATE (v2(n_b_row*n_t_col))
+                     v2 = HUGE(1.0_dp)
                   END IF
-
-                  ! Transfer data
-                  IF (p_row_0 /= 0) THEN
+   
+                  ! Get the matrix elements
+                  CALL pdgemr2d(n_t_row, n_t_col, m1%local_data(1, 1), 1, 1, &
+                                m1%matrix_struct%descriptor, &
+                                d1(1, 1), 1, 1, desc, cntxt_loc)
+                  IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
+                     CALL pdgemr2d(n_t_row, n_t_col, m2%local_data(1, 1), 1, 1, &
+                                   m2%matrix_struct%descriptor, &
+                                   d2(1, 1), 1, 1, desc, cntxt_loc)
+                  END IF
+   
+                  ! Row / column index
+                  k = 1
+                  l = 1
+   
+                  ! Loop over blocks of rows
+                  DO ir = 1, n_t_row, MAX(n_b_row, 1)
+   
+                     ! Number of rows in the block
+                     ib = MIN(n_b_row, n_t_row - ir + 1)
+   
+                     ! Local element position
+                     CALL infog2l(ir, 1, desc, n_p_row, n_p_col, p_row_i, p_col_i, &
+                                  ir_loc, ic_loc, p_row_0, p_col_0)
+   
+                     ! Save block-row columns
                      IF (p_row_0 == p_row_i) THEN
-                        CALL mp_send(v1(:), 0, tg1, m1%matrix_struct%para_env%group)
-                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
-                           CALL mp_send(v2(:), 0, tg2, m2%matrix_struct%para_env%group)
-                     END IF
-                     IF (p_row_i == 0) THEN
-                        CALL mp_recv(v1(:), p_row_0, tg1, m1%matrix_struct%para_env%group)
-                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
-                           CALL mp_recv(v2(:), p_row_0, tg2, m2%matrix_struct%para_env%group)
-                     END IF
-                  END IF
-
-                  ! Output
-                  IF (output_unit > 0) THEN
-                     DO ix = 1, ib
-                        DO ic = (ix - 1)*n_t_col + 1, n_t_col*ix
-
-                           IF (k <= MIN(ec%block(i)%n_ao, n_states) .AND. &
-                               l <= MIN(ec%block(j)%n_ao, n_states)) THEN
-
-                              WRITE (output_unit, '(T3,I3,A,I4,A,I1,A,I4,A,E20.6)', ADVANCE='no') &
-                                 i, "[", k, "] - ", j, "[", l, "] ", &
-                                 v1(ic)*evolt*1000.0_dp
-
-                              ! Second spin component
-                              IF (SIZE(ec%block(i)%hab, 1) > 1 .AND. &
-                                  k <= n_beta_states .AND. l <= n_beta_states) THEN
-                                 WRITE (output_unit, '(E20.6)', ADVANCE='no') &
-                                    v2(ic)*evolt*1000.0_dp
-                              END IF
-
-                              WRITE (output_unit, *)
-
-                           END IF
-
-                           ! Row / column IDs
-                           l = l + 1
-                           IF (l > n_t_col) THEN
-                              l = 1
-                              k = k + 1
-                           END IF
-
+                        DO ix = 1, ib
+                           v1((ix - 1)*n_t_col + 1:n_t_col*ix) = d1(ir_loc + ix - 1, :)
+                           IF (SIZE(ec%block(i)%hab, 1) > 1) &
+                              v2((ix - 1)*n_t_col + 1:n_t_col*ix) = d2(ir_loc + ix - 1, :)
                         END DO
-                     END DO
+                     END IF
+   
+                     ! Transfer data
+                     IF (p_row_0 /= 0) THEN
+                        IF (p_row_0 == p_row_i) THEN
+                           CALL mp_send(v1(:), 0, tg1, m1%matrix_struct%para_env%group)
+                           IF (SIZE(ec%block(i)%hab, 1) > 1) &
+                              CALL mp_send(v2(:), 0, tg2, m2%matrix_struct%para_env%group)
+                        END IF
+                        IF (p_row_i == 0) THEN
+                           CALL mp_recv(v1(:), p_row_0, tg1, m1%matrix_struct%para_env%group)
+                           IF (SIZE(ec%block(i)%hab, 1) > 1) &
+                              CALL mp_recv(v2(:), p_row_0, tg2, m2%matrix_struct%para_env%group)
+                        END IF
+                     END IF
+   
+                     ! Output
+                     IF (output_unit > 0) THEN
+                        DO ix = 1, ib
+                           DO ic = (ix - 1)*n_t_col + 1, n_t_col*ix
+   
+                              IF (k <= MIN(ec%block(i)%n_ao, n_states) .AND. &
+                                  l <= MIN(ec%block(j)%n_ao, n_states)) THEN
+   
+                                 WRITE (output_unit, '(T3,I3,A,I4,A,I1,A,I4,A,E20.6)', ADVANCE='no') &
+                                    i, "[", k, "] - ", j, "[", l, "] ", &
+                                    v1(ic)*evolt*1000.0_dp
+   
+                                 ! Second spin component
+                                 IF (SIZE(ec%block(i)%hab, 1) > 1 .AND. &
+                                     k <= n_beta_states .AND. l <= n_beta_states) THEN
+                                    WRITE (output_unit, '(E20.6)', ADVANCE='no') &
+                                       v2(ic)*evolt*1000.0_dp
+                                 END IF
+   
+                                 WRITE (output_unit, *)
+   
+                              END IF
+   
+                              ! Row / column IDs
+                              l = l + 1
+                              IF (l > n_t_col) THEN
+                                 l = 1
+                                 k = k + 1
+                              END IF
+   
+                           END DO
+                        END DO
+                     END IF
+   
+                  END DO
+   
+                  ! clean memory
+                  CALL cp_blacs_gridexit(cntxt_loc)
+   
+                  IF (ASSOCIATED(d1)) &
+                     DEALLOCATE (d1)
+                  IF (ASSOCIATED(v1)) &
+                     DEALLOCATE (v1)
+                  IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
+                     IF (ASSOCIATED(d2)) &
+                        DEALLOCATE (d2)
+                     IF (ASSOCIATED(v2)) &
+                        DEALLOCATE (v2)
                   END IF
 
-               END DO
-
-               ! clean memory
-               CALL cp_blacs_gridexit(cntxt_loc)
-
-               IF (ASSOCIATED(d1)) &
-                  DEALLOCATE (d1)
-               IF (ASSOCIATED(v1)) &
-                  DEALLOCATE (v1)
-               IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
-                  IF (ASSOCIATED(d2)) &
-                     DEALLOCATE (d2)
-                  IF (ASSOCIATED(v2)) &
-                     DEALLOCATE (v2)
                END IF
 
                id = id + 1
@@ -503,31 +507,33 @@ CONTAINS
                id = 1
                DO j = i + 1, ec%n_blocks
 
-                  DO k = 1, MIN(ec%block(i)%n_ao, n_states)
-                     DO l = 1, MIN(ec%block(j)%n_ao, n_states)
-
-                        IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
-
-                           WRITE (output_unit, '(T3,I3,A,I4,A,I1,A,I4,A,E20.6)', ADVANCE='no') &
-                              i, "[", k, "] - ", j, "[", l, "] ", &
-                              ec%block(i)%hab(1, id)%matrix%local_data(k, l)*evolt*1000.0_dp
-                           IF ((k <= n_beta_states) .AND. (l <= n_beta_states)) THEN
-                              WRITE (output_unit, '(E20.6)') &
-                                 ec%block(i)%hab(2, id)%matrix%local_data(k, l)*evolt*1000.0_dp
+                  IF (ASSOCIATED(ec%block(i)%hab(1,id)%matrix)) THEN
+                     DO k = 1, MIN(ec%block(i)%n_ao, n_states)
+                        DO l = 1, MIN(ec%block(j)%n_ao, n_states)
+   
+                           IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
+   
+                              WRITE (output_unit, '(T3,I3,A,I4,A,I1,A,I4,A,E20.6)', ADVANCE='no') &
+                                 i, "[", k, "] - ", j, "[", l, "] ", &
+                                 ec%block(i)%hab(1, id)%matrix%local_data(k, l)*evolt*1000.0_dp
+                              IF ((k <= n_beta_states) .AND. (l <= n_beta_states)) THEN
+                                 WRITE (output_unit, '(E20.6)') &
+                                    ec%block(i)%hab(2, id)%matrix%local_data(k, l)*evolt*1000.0_dp
+                              ELSE
+                                 WRITE (output_unit, *)
+                              END IF
+   
                            ELSE
-                              WRITE (output_unit, *)
+   
+                              WRITE (output_unit, '(T3,I3,A,I4,A,I1,A,I4,A,E20.6)') &
+                                 i, "[", k, "] - ", j, "[", l, "] ", &
+                                 ec%block(i)%hab(1, id)%matrix%local_data(k, l)*evolt*1000.0_dp
+   
                            END IF
-
-                        ELSE
-
-                           WRITE (output_unit, '(T3,I3,A,I4,A,I1,A,I4,A,E20.6)') &
-                              i, "[", k, "] - ", j, "[", l, "] ", &
-                              ec%block(i)%hab(1, id)%matrix%local_data(k, l)*evolt*1000.0_dp
-
-                        END IF
-
+   
+                        END DO
                      END DO
-                  END DO
+                  END IF
 
                   id = id + 1
 
