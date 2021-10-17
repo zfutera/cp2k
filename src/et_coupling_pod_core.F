@@ -402,11 +402,54 @@ CONTAINS
 
       ! Output logger
       IF (blocks) THEN
+
+         ! Log file
          logger => cp_get_default_logger()
+         ! Input file
          print_sec => section_vals_get_subs_vals(qs_env%input, &
                          'PROPERTIES%ET_COUPLING%PROJECTION%PRINT')
          block_sec => section_vals_get_subs_vals(qs_env%input, &
                          'PROPERTIES%ET_COUPLING%PROJECTION%BLOCK')
+
+         ! Check whether the POD blocks are available
+         read_hdg = .TRUE.
+         print_key => section_vals_get_subs_vals(print_sec, 'HAMILTONIAN')
+         DO i = 1, ec%n_blocks
+            CALL section_vals_val_get(block_sec, keyword_name='SKIP', l_val=skip_i, i_rep_section=i)
+            IF (skip_i) THEN
+               read_hdg = .FALSE.
+               EXIT
+            ELSE
+               DO j = 1, n_spins
+                  WRITE (filename, '(A8,I1.1,A1,I1.1)') 'RESTART_', i, '_', j
+                  file_hdg = cp_print_key_generate_filename(logger, print_key, middle_name=TRIM(filename), &
+                                extension='.hdg', my_local=.FALSE.)
+                  INQUIRE (file=file_hdg, exist=ok)
+                  IF (.NOT. ok) THEN
+                     read_hdg = .FALSE.
+                     EXIT
+                  END IF
+               END DO
+            END IF
+         END DO
+         ! Check whether the off-diagonal blocks are available
+         IF (read_hdg) THEN
+            DO i = 1, ec%n_blocks
+               DO j = i+1, ec%n_blocks
+                  DO k = 1, n_spins
+                     WRITE (filename, '(A8,I1.1,A1,I1.1,A1,I1.1)') 'RESTART_', i, '-', j, '_', k
+                     file_hdg = cp_print_key_generate_filename(logger, print_key, middle_name=TRIM(filename), &
+                                   extension='.hbk', my_local=.FALSE.)
+                     INQUIRE (file=file_hdg, exist=ok)
+                     IF (.NOT. ok) THEN
+                        read_hdg = .FALSE.
+                        EXIT
+                     END IF
+                  END DO
+               END DO
+            END DO
+         END IF
+
       END IF
 
       ! Parallel environment

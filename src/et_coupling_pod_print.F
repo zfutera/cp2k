@@ -531,7 +531,11 @@ CONTAINS
                               WRITE (output_unit, '(E20.6)') &
                                  ec%block(i)%hab(2, id)%matrix%local_data(k, l)*evolt*1000.0_dp
                            ELSE
-                              WRITE (output_unit, *)
+   
+                              WRITE (output_unit, '(T3,I3,A,I4,A,I1,A,I4,A,E20.6)') &
+                                 i, "[", k, "] - ", j, "[", l, "] ", &
+                                 ec%block(i)%hab(1, id)%matrix%local_data(k, l)*evolt*1000.0_dp
+   
                            END IF
    
                         ELSE
@@ -543,7 +547,7 @@ CONTAINS
                         END IF
    
                      END DO
-                  END DO
+                  END IF
 
                   id = id + 1
 
