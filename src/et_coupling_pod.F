@@ -584,9 +584,7 @@ CONTAINS
             END DO
 
             ! Print out coupling elements
-            IF (.NOT. blocks_only) THEN
-               CALL pod_print_couplings(output_unit, qs_env, ec, mo(1)%mo_set%nmo)
-            END IF
+            CALL pod_print_couplings(output_unit, qs_env, ec, mo(1)%mo_set%nmo)
 
             ! Save electronic states
             CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
