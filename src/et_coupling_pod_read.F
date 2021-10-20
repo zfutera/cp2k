@@ -369,7 +369,7 @@ CONTAINS
       ! Hamiltonian blocks
       IF (blocks) THEN
 
-         CALL pod_block_diag(output_unit, qs_env, ec, mat_h, .TRUE., blocks)
+         CALL pod_block_diag(output_unit, qs_env, ec, mat_h, n_spins, .TRUE., blocks)
 
       ! Full Hamiltonian
       ELSE
@@ -384,7 +384,7 @@ CONTAINS
  
             ! Calculate data from KS Hamiltonian
             CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, n_ao, n_spins)
-            CALL pod_block_diag(output_unit, qs_env, ec, mat_h, .TRUE., blocks)
+            CALL pod_block_diag(output_unit, qs_env, ec, mat_h, n_spins, .TRUE., blocks)
  
          END IF
 

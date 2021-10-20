@@ -242,17 +242,19 @@ CONTAINS
 !> \param qs_env QuickStep environment containing all system data
 !> \param ec electronic coupling data structure
 !> \param mat_h Hamiltonian in separated orthogonalized basis set
+!> \param n_spins Number of spin components
 !> \param restart Read data from restart files
 !> \param blocks Save Hamiltonian blocks to files, not to memory
 !> \author Z. Futera (02.2017)
 ! **************************************************************************************************
-   SUBROUTINE pod_block_diag(output_unit, qs_env, ec, mat_h, restart, blocks)
+   SUBROUTINE pod_block_diag(output_unit, qs_env, ec, mat_h, n_spins, restart, blocks)
 
       ! Routine arguments
       INTEGER                                            :: output_unit
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_cpl), POINTER                              :: ec
       TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_h
+      INTEGER                                            :: n_spins
       LOGICAL                                            :: restart
       LOGICAL                                            :: blocks
 
@@ -262,7 +264,7 @@ CONTAINS
       ! Local variables
       CHARACTER(LEN=default_path_length)                 :: filename, file_hdg
       LOGICAL                                            :: skip_i, skip_j, skip_off, skip_calc, read_hdg, ok
-      INTEGER                                            :: i, id, j, k, l, n_spins, spin, unit_hab, &
+      INTEGER                                            :: i, id, j, k, l, spin, unit_hab, &
                                                             unit_wfn, unit_hbk, handle
       REAL(KIND=dp), DIMENSION(:), POINTER               :: vec_e
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
@@ -286,9 +288,6 @@ CONTAINS
 
       ! Time mark
       CALL timeset(routineN, handle)
-
-      ! Number of spin components
-      n_spins = SIZE(mat_h)
 
       ! Settings
       read_hdg = .FALSE.
