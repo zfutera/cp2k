@@ -400,11 +400,11 @@ CONTAINS
             IF (blocks) THEN
 
                CALL section_vals_val_get(block_sec, keyword_name='SKIP', l_val=skip_i, i_rep_section=i)
-               
+
                IF (.NOT. skip_i) THEN
                
                   WRITE (filename, '(A8,I1.1,A1,I1.1,A1,I1.1)') 'RESTART_', i, '-', i, '_', spin
-               
+
                   ! Read block data from the file
                   IF (restart) THEN
 
@@ -458,6 +458,7 @@ CONTAINS
                   ! Save Hamiltonian block to file
                   ELSE
 
+                     skip_off = .TRUE.
                      skip_calc = .TRUE.
                
                      unit_hbk = cp_print_key_unit_nr(logger, print_sec, 'HAMILTONIAN', &
