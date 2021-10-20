@@ -459,7 +459,6 @@ CONTAINS
                   ! Save Hamiltonian block to file
                   ELSE
 
-                     skip_off = .TRUE.
                      skip_calc = .TRUE.
                
                      unit_hbk = cp_print_key_unit_nr(logger, print_sec, 'HAMILTONIAN', &
@@ -592,6 +591,8 @@ CONTAINS
                                             log_filename=.FALSE.)
                               CALL cp_fm_write_unformatted(ec%block(i)%hab(spin, id)%matrix, unit_hbk)
                               CALL cp_print_key_finished_output(unit_hbk, logger, print_sec, 'HAMILTONIAN')
+                              CALL cp_fm_release(matrix=ec%block(i)%hab(spin, id)%matrix)
+                              NULLIFY(ec%block(i)%hab(spin, id)%matrix)
                            END IF
     
                         END IF
