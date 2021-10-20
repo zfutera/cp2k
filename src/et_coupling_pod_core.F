@@ -425,7 +425,9 @@ CONTAINS
                         CPASSERT(.NOT. ASSOCIATED(vec_e))
                         ALLOCATE (vec_e(ec%block(i)%n_ao))
                         CPASSERT(ASSOCIATED(vec_e))
-                        READ (UNIT=unit_hbk) (vec_e(k), k=1, ec%block(i)%n_ao)
+                        IF (unit_hbk > 0) THEN
+                           READ (UNIT=unit_hbk) (vec_e(k), k=1, ec%block(i)%n_ao)
+                        END IF
 
                         CALL cp_fm_read_unformatted(dat(i)%matrix, unit_hbk)
 
@@ -517,7 +519,9 @@ CONTAINS
                                 extension='.hdg', middle_name=TRIM(filename), file_form='UNFORMATTED', &
                                 file_position='REWIND', file_action='WRITE', file_status='REPLACE', &
                                 log_filename=.FALSE.)
-                  WRITE (UNIT=unit_hbk) (vec_e(k), k=1, ec%block(i)%n_ao)
+                  IF (unit_hbk > 0) then
+                     WRITE (UNIT=unit_hbk) (vec_e(k), k=1, ec%block(i)%n_ao)
+                  END IF
                   CALL cp_fm_write_unformatted(mat_u, unit_hbk)
                   CALL cp_print_key_finished_output(unit_hbk, logger, print_sec, 'HAMILTONIAN')
 
