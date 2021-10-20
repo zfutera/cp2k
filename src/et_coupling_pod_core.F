@@ -514,6 +514,7 @@ CONTAINS
                   ! Save Hamiltonian block to file
                   ELSE
 
+                     skip_off = .TRUE.
                      skip_calc = .TRUE.
                
                      unit_hbk = cp_print_key_unit_nr(logger, print_sec, 'HAMILTONIAN', &
