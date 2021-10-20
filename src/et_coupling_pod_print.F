@@ -483,69 +483,11 @@ CONTAINS
    
                         END DO
                      END IF
-   
-                     ! Transfer data
-                     IF (p_row_0 /= 0) THEN
-                        IF (p_row_0 == p_row_i) THEN
-                           CALL mp_send(v1(:), 0, tg1, m1%matrix_struct%para_env%group)
-                           IF (SIZE(ec%block(i)%hab, 1) > 1) &
-                              CALL mp_send(v2(:), 0, tg2, m2%matrix_struct%para_env%group)
-                        END IF
-                        IF (p_row_i == 0) THEN
-                           CALL mp_recv(v1(:), p_row_0, tg1, m1%matrix_struct%para_env%group)
-                           IF (SIZE(ec%block(i)%hab, 1) > 1) &
-                              CALL mp_recv(v2(:), p_row_0, tg2, m2%matrix_struct%para_env%group)
-                        END IF
+                     IF (p_row_i == 0) THEN
+                        CALL mp_recv(v1(:), p_row_0, tg1, m1%matrix_struct%para_env%group)
+                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
+                           CALL mp_recv(v2(:), p_row_0, tg2, m2%matrix_struct%para_env%group)
                      END IF
-   
-                     ! Output
-                     IF (output_unit > 0) THEN
-                        DO ix = 1, ib
-                           DO ic = (ix - 1)*n_t_col + 1, n_t_col*ix
-   
-                              IF (k <= MIN(ec%block(i)%n_ao, n_states) .AND. &
-                                  l <= MIN(ec%block(j)%n_ao, n_states)) THEN
-   
-                                 WRITE (output_unit, '(T3,I3,A,I4,A,I1,A,I4,A,E20.6)', ADVANCE='no') &
-                                    i, "[", k, "] - ", j, "[", l, "] ", &
-                                    v1(ic)*evolt*1000.0_dp
-   
-                                 ! Second spin component
-                                 IF (SIZE(ec%block(i)%hab, 1) > 1 .AND. &
-                                     k <= n_beta_states .AND. l <= n_beta_states) THEN
-                                    WRITE (output_unit, '(E20.6)', ADVANCE='no') &
-                                       v2(ic)*evolt*1000.0_dp
-                                 END IF
-   
-                                 WRITE (output_unit, *)
-   
-                              END IF
-   
-                              ! Row / column IDs
-                              l = l + 1
-                              IF (l > n_t_col) THEN
-                                 l = 1
-                                 k = k + 1
-                              END IF
-   
-                           END DO
-                        END DO
-                     END IF
-   
-                  END DO
-   
-                  ! clean memory
-                  CALL cp_blacs_gridexit(cntxt_loc)
-   
-                  IF (ASSOCIATED(d1)) &
-                     DEALLOCATE (d1)
-                  IF (ASSOCIATED(v1)) &
-                     DEALLOCATE (v1)
-                  IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
-                     IF (ASSOCIATED(d2)) &
-                        DEALLOCATE (d2)
-                     IF (ASSOCIATED(v2)) &
-                        DEALLOCATE (v2)
                   END IF
    
                END DO
@@ -589,11 +531,7 @@ CONTAINS
                               WRITE (output_unit, '(E20.6)') &
                                  ec%block(i)%hab(2, id)%matrix%local_data(k, l)*evolt*1000.0_dp
                            ELSE
-   
-                              WRITE (output_unit, '(T3,I3,A,I4,A,I1,A,I4,A,E20.6)') &
-                                 i, "[", k, "] - ", j, "[", l, "] ", &
-                                 ec%block(i)%hab(1, id)%matrix%local_data(k, l)*evolt*1000.0_dp
-   
+                              WRITE (output_unit, *)
                            END IF
    
                         ELSE
@@ -605,7 +543,7 @@ CONTAINS
                         END IF
    
                      END DO
-                  END IF
+                  END DO
 
                   id = id + 1
 
