@@ -494,7 +494,8 @@ CONTAINS
                CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
                                           n_ao, dft_cntrl%nspins)
                ! Block diagonization
-               CALL pod_block_diag(output_unit, qs_env, ec, mat_h, restart, blocks_only)
+               CALL pod_block_diag(output_unit, qs_env, ec, mat_h, dft_cntrl%nspins, &
+                                   restart, blocks_only)
 
             END IF
 
@@ -569,7 +570,8 @@ CONTAINS
                CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
                                           n_ao, dft_cntrl%nspins)
                ! Block diagonization
-               CALL pod_block_diag(output_unit, qs_env, ec, mat_h, restart, blocks_only)
+               CALL pod_block_diag(output_unit, qs_env, ec, mat_h, dft_cntrl%nspins, &
+                                   restart, blocks_only)
 
             END IF
 
