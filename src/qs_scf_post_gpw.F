@@ -149,7 +149,8 @@ MODULE qs_scf_post_gpw
                                               qs_kind_type
    USE qs_ks_methods,                   ONLY: calc_rho_tot_gspace,&
                                               qs_ks_update_qs_env
-   USE qs_ks_types,                     ONLY: qs_ks_did_change
+   USE qs_ks_types,                     ONLY: qs_ks_did_change,&
+                                              qs_ks_env_type
    USE qs_loc_dipole,                   ONLY: loc_dipole
    USE qs_loc_states,                   ONLY: get_localization_info
    USE qs_loc_types,                    ONLY: qs_loc_env_create,&
@@ -194,6 +195,7 @@ MODULE qs_scf_post_gpw
    USE qs_scf_wfn_mix,                  ONLY: wfn_mix
    USE qs_subsys_types,                 ONLY: qs_subsys_get,&
                                               qs_subsys_type
+   USE qs_vxc,                          ONLY: qs_vxc_create
    USE qs_wannier90,                    ONLY: wannier90_interface
    USE s_square_methods,                ONLY: compute_s_square
    USE scf_control_types,               ONLY: scf_control_type
@@ -1573,6 +1575,119 @@ CONTAINS
    END SUBROUTINE write_available_results
 
 ! **************************************************************************************************
+!> \brief Save XC potential to CUBE file
+!> \param qs_env the qs_env in which the qs_env lives
+!> \author Z. Futera (11.2021)
+! **************************************************************************************************
+   SUBROUTINE write_xc_cube(qs_env)
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+
+      CHARACTER(len=*), PARAMETER :: routineN = 'write_xc_cube', &
+         routineP = moduleN//':'//routineN
+
+      ! local variables
+      LOGICAL                                            :: mpi_io
+      INTEGER                                            :: unit_nr
+      CHARACTER(LEN=default_path_length)                 :: cube_pos
+      REAL(KIND=dp)                                      :: xc_energy,udvol
+      TYPE(admm_type), POINTER                           :: admm_env
+      TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(particle_list_type), POINTER                  :: particles
+      TYPE(pw_env_type), POINTER                         :: pw_env
+      TYPE(pw_p_type), DIMENSION(:), POINTER             :: v_tau_rspace,v_tau_rspace_aux
+      TYPE(pw_p_type), DIMENSION(:), POINTER             :: v_xc_rspace,v_xc_rspace_aux
+      TYPE(qs_ks_env_type), POINTER                      :: ks_env
+      TYPE(qs_rho_type), POINTER                         :: rho
+      TYPE(qs_subsys_type), POINTER                      :: subsys
+      TYPE(section_vals_type), POINTER                   :: dft_section,input,xc_section
+
+      ! initialization
+      NULLIFY(admm_env,dft_control,dft_section,input,ks_env,particles,pw_env, &
+              rho,subsys,v_tau_rspace,v_tau_rspace_aux,v_xc_rspace,v_xc_rspace_aux,xc_section)
+
+      logger => cp_get_default_logger()
+
+      xc_energy = 0.0_dp
+
+      CALL get_qs_env(qs_env,dft_control=dft_control,input=input,&
+           ks_env=ks_env,pw_env=pw_env,rho=rho,subsys=subsys)
+      CALL qs_subsys_get(subsys,particles=particles)
+      dft_section => section_vals_get_subs_vals(input,"DFT")
+
+      ! ADMM
+      IF (dft_control%do_admm) THEN
+
+        CALL get_qs_env(qs_env, admm_env=admm_env)
+        ! XC specification
+        xc_section => admm_env%xc_section_aux
+        ! Density
+        IF (dft_control%qs_control%gapw_xc) THEN
+          CALL get_qs_env(qs_env=qs_env,rho_xc=rho)
+        ELSE
+          CALL get_qs_env(qs_env=qs_env,rho_aux_fit=rho)
+        END IF
+        ! XC potential
+        CALL qs_vxc_create(ks_env=ks_env,rho_struct=rho,xc_section=xc_section, &
+                           vxc_rho=v_xc_rspace_aux,vxc_tau=v_tau_rspace_aux,exc=xc_energy)
+
+        NULLIFY (rho)
+        xc_section => admm_env%xc_section_primary
+
+      ELSE
+        xc_section => section_vals_get_subs_vals(input, "DFT%XC")
+      END IF
+
+      ! Density
+      IF (dft_control%qs_control%gapw_xc) THEN
+        CALL get_qs_env(qs_env=qs_env,rho_xc=rho)
+      ELSE
+        CALL get_qs_env(qs_env=qs_env,rho=rho)
+      END IF
+
+      ! ZMP
+      IF (dft_control%apply_external_density.OR.dft_control%apply_external_vxc) THEN
+        CPABORT("Saving ZMP v_xc to CUBE not supported")
+      ELSE
+
+        CALL qs_vxc_create(ks_env=ks_env,rho_struct=rho,xc_section=xc_section, &
+                           vxc_rho=v_xc_rspace,vxc_tau=v_tau_rspace,exc=xc_energy)
+
+      END IF
+
+      ! Save XC potential to CUBE file
+      IF (ASSOCIATED(v_xc_rspace)) THEN
+
+        ! Writing pointer position
+        cube_pos = "REWIND"
+        IF (section_get_lval(input, "DFT%PRINT%V_XC_CUBE%APPEND")) THEN
+          cube_pos = "APPEND"
+        END IF
+
+        ! Output unit
+        unit_nr = cp_print_key_unit_nr(logger,input,"DFT%PRINT%V_XC_CUBE", &
+                                       extension=".cube",middle_name="v_xc", &
+                                       file_position=cube_pos,mpi_io=mpi_io)
+
+        IF (SIZE(v_xc_rspace).lt.0.or.SIZE(v_xc_rspace).gt.2) THEN
+          CPABORT("Dimension of v_xc_rspace data array is not 1 or 2")
+        END IF
+
+        ! Volume element
+        udvol = 1.0_dp/v_xc_rspace(1)%pw%pw_grid%dvol
+
+        ! Save data to the CUBE file
+        CALL cp_pw_to_cube(v_xc_rspace(1)%pw,unit_nr,"XC POTENTIAL",particles=particles, &
+                           stride=section_get_ivals(dft_section,"PRINT%V_XC_CUBE%STRIDE"), &
+                           mpi_io=mpi_io)
+        CALL cp_print_key_finished_output(unit_nr,logger,input,"DFT%PRINT%V_XC_CUBE", &
+                                          mpi_io=mpi_io)
+
+      END IF
+
+   END SUBROUTINE write_xc_cube
+
+! **************************************************************************************************
 !> \brief Write QS results available if MO's are present (if switched on through the print_keys)
 !>        Writes only MO dependent results. Split is necessary as ls_scf does not
 !>        provide MO's
@@ -2250,6 +2365,13 @@ CONTAINS
 
          CALL pw_pool_give_back_pw(auxbas_pw_pool, aux_r%pw)
       END IF
+
+      ! Print the exchange-correlation potential
+      IF (BTEST(cp_print_key_should_output(logger%iter_info, input, &
+                                           "DFT%PRINT%V_XC_CUBE"), cp_p_file)) THEN
+        call write_xc_cube(qs_env)
+
+      ENDIF
 
       ! Print the external potential
       IF (BTEST(cp_print_key_should_output(logger%iter_info, input, &
