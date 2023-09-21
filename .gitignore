@@ -1,3 +1,12 @@
+# local files
+arch/prcc02008.ssmp
+arch/prcc02008.psmp
+manual
+rt-sopt
+rt-ssmp
+rt-popt
+rt-psmp
+
 # base directory structure
 /exe/
 /lib/
