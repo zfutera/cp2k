@@ -482,12 +482,7 @@ CONTAINS
                            END IF
    
                         END DO
-                     END IF
-                     IF (p_row_i == 0) THEN
-                        CALL mp_recv(v1(:), p_row_0, tg1, m1%matrix_struct%para_env%group)
-                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
-                           CALL mp_recv(v2(:), p_row_0, tg2, m2%matrix_struct%para_env%group)
-                     END IF
+                     END DO
                   END IF
    
                END DO
