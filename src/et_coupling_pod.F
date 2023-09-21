@@ -85,6 +85,7 @@ CONTAINS
       ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_set_fermi', routineP = moduleN//':'//routineN
 
+
       NULLIFY (ec%fermi)
 
       IF (PRESENT(fb)) THEN
@@ -586,9 +587,6 @@ CONTAINS
 
             ! Print out coupling elements
             CALL pod_print_couplings(output_unit, qs_env, ec, mo(1)%mo_set%nmo)
-
-            ! Save electronic states
-            CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
 
             ! Save electronic states
             CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
