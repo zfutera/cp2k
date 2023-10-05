@@ -14,7 +14,7 @@ MODULE et_coupling_pod_types
                                               cp_fm_type
    USE kinds,                           ONLY: dp
    USE qs_mo_types,                     ONLY: deallocate_mo_set,&
-                                              mo_set_p_type
+                                              mo_set_type
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -58,7 +58,7 @@ MODULE et_coupling_pod_types
       INTEGER                                            :: n_ao
       INTEGER                                            :: n_hab_blocks
       TYPE(et_cpl_atom), DIMENSION(:), POINTER           :: atom
-      TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mo
+      TYPE(mo_set_type), DIMENSION(:), POINTER           :: mo
       TYPE(cp_fm_p_type), DIMENSION(:, :), POINTER       :: hab
    END TYPE et_cpl_block
 
@@ -108,13 +108,8 @@ CONTAINS
             DO i = 1, SIZE(ec%block)
                IF (ASSOCIATED(ec%block(i)%atom)) &
                   DEALLOCATE (ec%block(i)%atom)
-               IF (ASSOCIATED(ec%block(i)%mo)) THEN
-                  DO j = 1, SIZE(ec%block(i)%mo)
-                     IF (ASSOCIATED(ec%block(i)%mo(j)%mo_set)) &
-                        CALL deallocate_mo_set(ec%block(i)%mo(j)%mo_set)
-                  END DO
+               IF (ASSOCIATED(ec%block(i)%mo)) &
                   DEALLOCATE (ec%block(i)%mo)
-               END IF
                IF (ASSOCIATED(ec%block(i)%hab)) THEN
                   DO j = 1, SIZE(ec%block(i)%hab, 1)
                      DO k = 1, SIZE(ec%block(i)%hab, 2)

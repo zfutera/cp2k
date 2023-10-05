@@ -131,8 +131,8 @@ CONTAINS
       IF (unit_nr > 0) THEN
 
          ! Save block energies
-         WRITE (UNIT=unit_nr) (ec%block(ib)%mo(is)%mo_set%eigenvalues(i), &
-                               i=1, ec%block(ib)%mo(is)%mo_set%nmo)
+         WRITE (UNIT=unit_nr) (ec%block(ib)%mo(is)%eigenvalues(i), &
+                               i=1, ec%block(ib)%mo(is)%nmo)
 
          FLUSH (unit_nr)
 
@@ -262,7 +262,7 @@ CONTAINS
       ! Print states of all blocks
       DO i = 1, ec%n_blocks
 
-         IF (ASSOCIATED(ec%block(i)%mo(1)%mo_set)) THEN
+         IF (ASSOCIATED(ec%block(i)%mo)) THEN
 
             print_sec => section_vals_get_subs_vals(block_sec, 'PRINT', i_rep_section=i)
  
@@ -275,7 +275,7 @@ CONTAINS
                ! Spin states
                DO j = 1, n_spins
  
-                  mo => ec%block(i)%mo(j)%mo_set
+                  mo => ec%block(i)%mo(j)
  
                   CALL section_vals_val_get(mo_sec, keyword_name='MO_LIST', n_rep_val=n)
  
@@ -414,7 +414,7 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       ! Save data to file
-      CALL cp_fm_write_unformatted(ec%block(ib)%mo(is)%mo_set%mo_coeff, unit_nr)
+      CALL cp_fm_write_unformatted(ec%block(ib)%mo(is)%mo_coeff, unit_nr)
 
       IF (unit_nr > 0) &
          FLUSH (unit_nr)

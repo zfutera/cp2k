@@ -19,13 +19,13 @@ MODULE et_coupling_pod_read
                                               cp_fm_read_unformatted,&
                                               cp_fm_p_type,&
                                               cp_fm_type
-   USE cp_para_types,                   ONLY: cp_para_env_type
    USE et_coupling_pod_core,            ONLY: pod_block_diag,&
                                               pod_block_hamiltonian
    USE et_coupling_pod_types,           ONLY: et_cpl
    USE et_coupling_pod_utils,           ONLY: pod_get_transf_mat
    USE kinds,                           ONLY: default_path_length,&
                                               dp
+   USE message_passing,                 ONLY: mp_para_env_type
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
    USE qs_kind_types,                   ONLY: get_qs_kind_set,&
@@ -123,7 +123,7 @@ CONTAINS
       REAL(KIND=dp)                                      :: mx_occ
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(mp_para_env_type), POINTER                    :: para_env
       TYPE(mo_set_type), POINTER                         :: mo
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(scf_control_type), POINTER                    :: scf_cntrl
@@ -197,9 +197,6 @@ CONTAINS
          CPASSERT(.NOT. ASSOCIATED(ec%block(i)%mo))
          ALLOCATE (ec%block(i)%mo(n_spins))
          CPASSERT(ASSOCIATED(ec%block(i)%mo))
-         DO j = 1, n_spins
-            NULLIFY (ec%block(i)%mo(j)%mo_set)
-         END DO
          ! Memory for couplings
          ec%block(i)%n_hab_blocks = ec%n_blocks - i
          CPASSERT(.NOT. ASSOCIATED(ec%block(i)%hab))
@@ -232,10 +229,9 @@ CONTAINS
             ! State energies
             n_mo = ec%block(j)%n_ao
 
-            NULLIFY (ec%block(j)%mo(i)%mo_set)
-            CALL allocate_mo_set(ec%block(j)%mo(i)%mo_set, n_ao, n_mo, n_el, &
+            CALL allocate_mo_set(ec%block(j)%mo(i), n_ao, n_mo, n_el, &
                                  REAL(n_el, dp), mx_occ, 0.0_dp)
-            mo => ec%block(j)%mo(i)%mo_set
+            mo => ec%block(j)%mo(i)
 
             NULLIFY (mo%eigenvalues)
             ALLOCATE (mo%eigenvalues(n_mo))
