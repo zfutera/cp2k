@@ -1,4 +1,10 @@
 # local files
+arch/it4i-gnu.psmp
+arch/it4i-gnu.ssmp
+arch/it4i-intel-slibs.psmp
+arch/it4i-intel-slibs.ssmp
+arch/it4i-intel.psmp
+arch/it4i-intel.ssmp
 arch/prcc02008.ssmp
 arch/prcc02008.psmp
 manual
@@ -8,6 +14,12 @@ rt-popt
 rt-psmp
 
 # base directory structure
+arch/it4i-gnu.psmp
+arch/it4i-gnu.ssmp
+arch/it4i-intel-slibs.psmp
+arch/it4i-intel-slibs.ssmp
+arch/it4i-intel.psmp
+arch/it4i-intel.ssmp
 /exe/
 /lib/
 /obj/

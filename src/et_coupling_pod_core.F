@@ -24,14 +24,12 @@ MODULE et_coupling_pod_core
                                               cp_fm_to_fm_submat,&
                                               cp_fm_type,&
                                               cp_fm_write_unformatted
-   USE cp_gemm_interface,               ONLY: cp_gemm
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_type,&
                                               cp_to_string
    USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
                                               cp_print_key_generate_filename,&
                                               cp_print_key_unit_nr
-   USE cp_para_types,                   ONLY: cp_para_env_type
    USE dbcsr_api,                       ONLY: dbcsr_p_type
    USE et_coupling_pod_mo,              ONLY: pod_mo_set
    USE et_coupling_pod_save,            ONLY: pod_save_coupl_close,&
@@ -48,6 +46,8 @@ MODULE et_coupling_pod_core
    USE kinds,                           ONLY: default_path_length,&
                                               dp
    USE kpoint_types,                    ONLY: kpoint_type
+   USE message_passing,                 ONLY: mp_para_env_type
+   USE parallel_gemm_api,               ONLY: parallel_gemm
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
 #include "./base/base_uses.f90"
@@ -137,14 +137,14 @@ CONTAINS
                         ! Local H element
                         IF ((ch_row_f == ch_row) .AND. (ch_col_f == ch_col)) THEN
                            xh = mat_h%local_data(ih_p_row, ih_p_col)
-                           CALL dgebs2d(mat_h%matrix_struct%context%group, 'All', ' ', 1, 1, xh, 1)
+                           CALL mat_h%matrix_struct%context%dgebs2d('All', ' ', 1, 1, xh, 1)
                            IF ((cw_row_f == cw_row) .AND. (cw_col_f == cw_col)) THEN
                               mat_w%local_data(iw_p_row, iw_p_col) = xh
                            END IF
                            ! Remote H element
                         ELSE
-                           CALL dgebr2d(mat_h%matrix_struct%context%group, &
-                                        'All', ' ', 1, 1, xh, 1, ch_row_f, ch_col_f)
+                           CALL mat_h%matrix_struct%context%dgebr2d('All', ' ', 1, 1, xh, 1, &
+                                ch_row_f, ch_col_f)
                            IF ((cw_row_f == cw_row) .AND. (cw_col_f == cw_col)) THEN
                               mat_w%local_data(iw_p_row, iw_p_col) = xh
                            END IF
@@ -221,10 +221,10 @@ CONTAINS
          CALL copy_dbcsr_to_fm(mat_h(i)%matrix, mat_t(i)%matrix)
 
          ! Transform KS Hamiltonian to the orthogonalized AO basis set
-         CALL cp_gemm("N", "N", n_ao, n_ao, n_ao, 1.0_dp, &
-                      ec%tmatf, mat_t(i)%matrix, 0.0_dp, mat_w)
-         CALL cp_gemm("N", "N", n_ao, n_ao, n_ao, 1.0_dp, &
-                      mat_w, ec%tmatf, 0.0_dp, mat_t(i)%matrix)
+         CALL parallel_gemm("N", "N", n_ao, n_ao, n_ao, 1.0_dp, &
+                            ec%tmatf, mat_t(i)%matrix, 0.0_dp, mat_w)
+         CALL parallel_gemm("N", "N", n_ao, n_ao, n_ao, 1.0_dp, &
+                            mat_w, ec%tmatf, 0.0_dp, mat_t(i)%matrix)
 
          ! Reorder KS Hamiltonian elements to defined block structure
          CALL pod_block_projection(ec, mat_t(i)%matrix, mat_w)
@@ -272,7 +272,7 @@ CONTAINS
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
       TYPE(cp_fm_type), POINTER                          :: mat_u
       TYPE(cp_logger_type), POINTER                      :: logger
-      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(mp_para_env_type), POINTER                    :: para_env
       TYPE(section_vals_type), POINTER                   :: block_sec, print_sec, print_key
 
       ! Pointer initialization
@@ -355,9 +355,6 @@ CONTAINS
          CPASSERT(.NOT. ASSOCIATED(ec%block(i)%mo))
          ALLOCATE (ec%block(i)%mo(n_spins))
          CPASSERT(ASSOCIATED(ec%block(i)%mo))
-         DO j = 1, n_spins
-            NULLIFY (ec%block(i)%mo(j)%mo_set)
-         END DO
          ! Memory for couplings
          ec%block(i)%n_hab_blocks = ec%n_blocks - i
          CPASSERT(.NOT. ASSOCIATED(ec%block(i)%hab))
@@ -603,10 +600,10 @@ CONTAINS
                      IF (.NOT. blocks .OR. read_hdg) THEN
  
                         CALL cp_fm_create(matrix=mat_u, matrix_struct=fm_s, name='FULL WORK MATRIX')
-                        CALL cp_gemm("T", "N", ec%block(i)%n_ao, ec%block(j)%n_ao, ec%block(i)%n_ao, &
-                                     1.0_dp, dat(i)%matrix, ec%block(i)%hab(spin, id)%matrix, 0.0_dp, mat_u)
-                        CALL cp_gemm("N", "N", ec%block(i)%n_ao, ec%block(j)%n_ao, ec%block(j)%n_ao, &
-                                     1.0_dp, mat_u, dat(j)%matrix, 0.0_dp, ec%block(i)%hab(spin, id)%matrix)
+                        CALL parallel_gemm("T", "N", ec%block(i)%n_ao, ec%block(j)%n_ao, ec%block(i)%n_ao, &
+                                           1.0_dp, dat(i)%matrix, ec%block(i)%hab(spin, id)%matrix, 0.0_dp, mat_u)
+                        CALL parallel_gemm("N", "N", ec%block(i)%n_ao, ec%block(j)%n_ao, ec%block(j)%n_ao, &
+                                           1.0_dp, mat_u, dat(j)%matrix, 0.0_dp, ec%block(i)%hab(spin, id)%matrix)
  
                         ! Save coupling elements to binary data file
                         CALL pod_save_coupl_elements(ec, i, id, spin, unit_hab); 
