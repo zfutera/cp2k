@@ -169,7 +169,7 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       ! Save data to file
-      CALL cp_fm_write_unformatted(ec%block(i1)%hab(is, i2)%matrix, unit_nr)
+      CALL cp_fm_write_unformatted(ec%block(i1)%hab(is, i2), unit_nr)
 
       IF (unit_nr > 0) &
          FLUSH (unit_nr)

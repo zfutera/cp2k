@@ -9,8 +9,7 @@
 ! **************************************************************************************************
 MODULE et_coupling_pod_types
 
-   USE cp_fm_types,                     ONLY: cp_fm_p_type,&
-                                              cp_fm_release,&
+   USE cp_fm_types,                     ONLY: cp_fm_release,&
                                               cp_fm_type
    USE kinds,                           ONLY: dp
    USE qs_mo_types,                     ONLY: deallocate_mo_set,&
@@ -39,8 +38,8 @@ MODULE et_coupling_pod_types
       INTEGER                                            :: n_atoms
       INTEGER                                            :: n_blocks
       REAL(KIND=dp), DIMENSION(:), POINTER               :: fermi
-      TYPE(cp_fm_type), POINTER                          :: tmatf
-      TYPE(cp_fm_type), POINTER                          :: tmatr
+      TYPE(cp_fm_type)                                   :: tmatf
+      TYPE(cp_fm_type)                                   :: tmatr
       TYPE(et_cpl_block), DIMENSION(:), POINTER          :: block
    END TYPE et_cpl
 
@@ -59,7 +58,7 @@ MODULE et_coupling_pod_types
       INTEGER                                            :: n_hab_blocks
       TYPE(et_cpl_atom), DIMENSION(:), POINTER           :: atom
       TYPE(mo_set_type), DIMENSION(:), POINTER           :: mo
-      TYPE(cp_fm_p_type), DIMENSION(:, :), POINTER       :: hab
+      TYPE(cp_fm_type), DIMENSION(:, :), POINTER         :: hab
    END TYPE et_cpl_block
 
    ! Electronic-coupling block-atom data
@@ -98,10 +97,8 @@ CONTAINS
 
          IF (ASSOCIATED(ec%fermi)) &
             DEALLOCATE (ec%fermi)
-         IF (ASSOCIATED(ec%tmatf)) &
-            CALL cp_fm_release(matrix=ec%tmatf)
-         IF (ASSOCIATED(ec%tmatr)) &
-            CALL cp_fm_release(matrix=ec%tmatr)
+         CALL cp_fm_release(matrix=ec%tmatf)
+         CALL cp_fm_release(matrix=ec%tmatr)
 
          IF (ASSOCIATED(ec%block)) THEN
 
@@ -113,8 +110,7 @@ CONTAINS
                IF (ASSOCIATED(ec%block(i)%hab)) THEN
                   DO j = 1, SIZE(ec%block(i)%hab, 1)
                      DO k = 1, SIZE(ec%block(i)%hab, 2)
-                        IF (ASSOCIATED(ec%block(i)%hab(j, k)%matrix)) &
-                           CALL cp_fm_release(matrix=ec%block(i)%hab(j, k)%matrix)
+                        CALL cp_fm_release(matrix=ec%block(i)%hab(j, k))
                      END DO
                   END DO
                   DEALLOCATE (ec%block(i)%hab)

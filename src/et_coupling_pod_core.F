@@ -17,7 +17,6 @@ MODULE et_coupling_pod_core
                                               cp_fm_struct_release,&
                                               cp_fm_struct_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
-                                              cp_fm_p_type,&
                                               cp_fm_read_unformatted,&
                                               cp_fm_release,&
                                               cp_fm_to_fm,&
@@ -76,8 +75,8 @@ CONTAINS
 
       ! Routine arguments
       TYPE(et_cpl), POINTER                              :: ec
-      TYPE(cp_fm_type), POINTER                          :: mat_h
-      TYPE(cp_fm_type), POINTER                          :: mat_w
+      TYPE(cp_fm_type)                                   :: mat_h
+      TYPE(cp_fm_type)                                   :: mat_w
 
       ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_block_projection', &
@@ -188,8 +187,8 @@ CONTAINS
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_cpl), POINTER                              :: ec
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_t
-      TYPE(cp_fm_type), POINTER                          :: mat_w
+      TYPE(cp_fm_type), DIMENSION(:), POINTER            :: mat_t
+      TYPE(cp_fm_type)                                   :: mat_w
       INTEGER                                            :: n_ao, n_spins
 
       ! Routine name for debug purposes
@@ -199,9 +198,6 @@ CONTAINS
       ! Local variables
       INTEGER                                            :: i, handle
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mat_h
-
-      ! Pointer initialization
-      NULLIFY (mat_h)
 
       ! Time mark
       CALL timeset(routineN, handle)
@@ -216,18 +212,18 @@ CONTAINS
       DO i = 1, n_spins
 
          ! Full-matrix format
-         CALL cp_fm_create(matrix=mat_t(i)%matrix, matrix_struct=fm_s, &
+         CALL cp_fm_create(matrix=mat_t(i), matrix_struct=fm_s, &
                            name='KS HAMILTONIAN IN SEPARATED ORTHOGONALIZED BASIS SET')
-         CALL copy_dbcsr_to_fm(mat_h(i)%matrix, mat_t(i)%matrix)
+         CALL copy_dbcsr_to_fm(mat_h(i)%matrix, mat_t(i))
 
          ! Transform KS Hamiltonian to the orthogonalized AO basis set
          CALL parallel_gemm("N", "N", n_ao, n_ao, n_ao, 1.0_dp, &
-                            ec%tmatf, mat_t(i)%matrix, 0.0_dp, mat_w)
+                            ec%tmatf, mat_t(i), 0.0_dp, mat_w)
          CALL parallel_gemm("N", "N", n_ao, n_ao, n_ao, 1.0_dp, &
-                            mat_w, ec%tmatf, 0.0_dp, mat_t(i)%matrix)
+                            mat_w, ec%tmatf, 0.0_dp, mat_t(i))
 
          ! Reorder KS Hamiltonian elements to defined block structure
-         CALL pod_block_projection(ec, mat_t(i)%matrix, mat_w)
+         CALL pod_block_projection(ec, mat_t(i), mat_w)
 
       END DO
 
@@ -253,7 +249,7 @@ CONTAINS
       INTEGER                                            :: output_unit
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_cpl), POINTER                              :: ec
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_h
+      TYPE(cp_fm_type), DIMENSION(:), POINTER            :: mat_h
       INTEGER                                            :: n_spins
       LOGICAL                                            :: restart
       LOGICAL                                            :: blocks
@@ -268,9 +264,9 @@ CONTAINS
                                                             unit_wfn, unit_hbk, handle
       REAL(KIND=dp), DIMENSION(:), POINTER               :: vec_e
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: dat
+      TYPE(cp_fm_type), DIMENSION(:), ALLOCATABLE        :: dat
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(cp_fm_type), POINTER                          :: mat_u
+      TYPE(cp_fm_type)                                   :: mat_u
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(mp_para_env_type), POINTER                    :: para_env
       TYPE(section_vals_type), POINTER                   :: block_sec, print_sec, print_key
@@ -279,10 +275,8 @@ CONTAINS
       NULLIFY (vec_e)
       NULLIFY (blacs_env)
       NULLIFY (block_sec)
-      NULLIFY (dat)
       NULLIFY (fm_s)
       NULLIFY (logger)
-      NULLIFY (mat_u)
       NULLIFY (para_env)
       NULLIFY (print_sec)
 
@@ -347,7 +341,7 @@ CONTAINS
 
       ! Storage for block sub-matrices
       ALLOCATE (dat(ec%n_blocks))
-      CPASSERT(ASSOCIATED(dat))
+      CPASSERT(ALLOCATED(dat))
 
       ! Storage for couplings and wavefunctions
       DO i = 1, ec%n_blocks
@@ -361,11 +355,6 @@ CONTAINS
          IF (ec%block(i)%n_hab_blocks > 0) THEN
             ALLOCATE (ec%block(i)%hab(n_spins, ec%block(i)%n_hab_blocks))
             CPASSERT(ASSOCIATED(ec%block(i)%hab))
-            DO j = 1, n_spins
-               DO k = 1, ec%block(i)%n_hab_blocks
-                  NULLIFY (ec%block(i)%hab(j, k)%matrix)
-               END DO
-            END DO
          END IF
       END DO
 
@@ -389,7 +378,7 @@ CONTAINS
             ! Memory allocation
             CALL cp_fm_struct_create(fmstruct=fm_s, para_env=para_env, context=blacs_env, &
                                      nrow_global=ec%block(i)%n_ao, ncol_global=ec%block(i)%n_ao)
-            CALL cp_fm_create(matrix=dat(i)%matrix, matrix_struct=fm_s, &
+            CALL cp_fm_create(matrix=dat(i), matrix_struct=fm_s, &
                               name='H_KS DIAGONAL BLOCK')
 
             ! Save block to file only
@@ -426,9 +415,9 @@ CONTAINS
                            READ (UNIT=unit_hbk) (vec_e(k), k=1, ec%block(i)%n_ao)
                         END IF
 
-                        CALL cp_fm_read_unformatted(dat(i)%matrix, unit_hbk)
+                        CALL cp_fm_read_unformatted(dat(i), unit_hbk)
 
-                        CALL pod_mo_set(qs_env, ec, i, spin, dat(i)%matrix, vec_e)
+                        CALL pod_mo_set(qs_env, ec, i, spin, dat(i), vec_e)
 
                         CALL pod_save_coupl_states(ec, i, spin, unit_hab)
                         CALL pod_save_state_coeffs(ec, i, spin, unit_wfn)
@@ -449,7 +438,7 @@ CONTAINS
                         unit_hbk = cp_print_key_unit_nr(logger, print_sec, 'HAMILTONIAN', &
                                       extension='.hbk', middle_name=TRIM(filename), file_form='UNFORMATTED', &
                                       file_position='REWIND', file_action='READ', log_filename=.FALSE.)
-                        CALL cp_fm_read_unformatted(dat(i)%matrix, unit_hbk)
+                        CALL cp_fm_read_unformatted(dat(i), unit_hbk)
 
                      END IF
                
@@ -462,9 +451,9 @@ CONTAINS
                                    extension='.hbk', middle_name=TRIM(filename), file_form='UNFORMATTED', &
                                    file_position='REWIND', file_action='WRITE', file_status='REPLACE', &
                                    log_filename=.FALSE.)
-                     CALL cp_fm_to_fm_submat(mat_h(spin)%matrix, dat(i)%matrix, ec%block(i)%n_ao, &
+                     CALL cp_fm_to_fm_submat(mat_h(spin), dat(i), ec%block(i)%n_ao, &
                              ec%block(i)%n_ao, j, j, 1, 1)
-                     CALL cp_fm_write_unformatted(dat(i)%matrix, unit_hbk)
+                     CALL cp_fm_write_unformatted(dat(i), unit_hbk)
                
                   END IF
                
@@ -483,7 +472,7 @@ CONTAINS
 
                ! Block elements
                IF (.NOT. blocks) THEN
-                  CALL cp_fm_to_fm_submat(mat_h(spin)%matrix, dat(i)%matrix, ec%block(i)%n_ao, &
+                  CALL cp_fm_to_fm_submat(mat_h(spin), dat(i), ec%block(i)%n_ao, &
                           ec%block(i)%n_ao, j, j, 1, 1)
                END IF
 
@@ -493,8 +482,8 @@ CONTAINS
                CPASSERT(ASSOCIATED(vec_e))
 
                CALL cp_fm_create(matrix=mat_u, matrix_struct=fm_s, name='UNITARY MATRIX')
-               CALL choose_eigv_solver(dat(i)%matrix, mat_u, vec_e)
-               CALL cp_fm_to_fm(mat_u, dat(i)%matrix)
+               CALL choose_eigv_solver(dat(i), mat_u, vec_e)
+               CALL cp_fm_to_fm(mat_u, dat(i))
 
                ! Save state energies / vectors
                CALL pod_mo_set(qs_env, ec, i, spin, mat_u, vec_e)
@@ -525,7 +514,6 @@ CONTAINS
 
                ! Clean memory
                CALL cp_fm_release(matrix=mat_u)
-               NULLIFY (mat_u)
                IF (ASSOCIATED(vec_e)) &
                   DEALLOCATE (vec_e)
                NULLIFY (vec_e)
@@ -553,7 +541,7 @@ CONTAINS
                      ! Memory allocation
                      CALL cp_fm_struct_create(fmstruct=fm_s, para_env=para_env, context=blacs_env, &
                                               nrow_global=ec%block(i)%n_ao, ncol_global=ec%block(j)%n_ao)
-                     CALL cp_fm_create(matrix=ec%block(i)%hab(spin, id)%matrix, matrix_struct=fm_s, &
+                     CALL cp_fm_create(matrix=ec%block(i)%hab(spin, id), matrix_struct=fm_s, &
                                        name='H_KS OFF-DIAGONAL BLOCK')
   
                      ! Read block elements from restart file
@@ -563,14 +551,14 @@ CONTAINS
                         unit_hbk = cp_print_key_unit_nr(logger, print_sec, 'HAMILTONIAN', &
                                       extension='.hbk', middle_name=TRIM(filename), file_form='UNFORMATTED', &
                                       file_position='REWIND', file_action='READ', log_filename=.FALSE.)
-                        CALL cp_fm_read_unformatted(ec%block(i)%hab(spin, id)%matrix, unit_hbk)
+                        CALL cp_fm_read_unformatted(ec%block(i)%hab(spin, id), unit_hbk)
                         CALL cp_print_key_finished_output(unit_hbk, logger, print_sec, 'HAMILTONIAN')
 
                      ! Copy block data from Hamiltonian
                      ELSE
 
-                        CALL cp_fm_to_fm_submat(mat_h(spin)%matrix, &
-                                                ec%block(i)%hab(spin, id)%matrix, ec%block(i)%n_ao, &
+                        CALL cp_fm_to_fm_submat(mat_h(spin), &
+                                                ec%block(i)%hab(spin, id), ec%block(i)%n_ao, &
                                                 ec%block(j)%n_ao, k, l, 1, 1)
 
                         ! Save block to file
@@ -586,10 +574,9 @@ CONTAINS
                                             extension='.hbk', middle_name=TRIM(filename), file_form='UNFORMATTED', &
                                             file_position='REWIND', file_action='WRITE', file_status='REPLACE', &
                                             log_filename=.FALSE.)
-                              CALL cp_fm_write_unformatted(ec%block(i)%hab(spin, id)%matrix, unit_hbk)
+                              CALL cp_fm_write_unformatted(ec%block(i)%hab(spin, id), unit_hbk)
                               CALL cp_print_key_finished_output(unit_hbk, logger, print_sec, 'HAMILTONIAN')
-                              CALL cp_fm_release(matrix=ec%block(i)%hab(spin, id)%matrix)
-                              NULLIFY(ec%block(i)%hab(spin, id)%matrix)
+                              CALL cp_fm_release(matrix=ec%block(i)%hab(spin, id))
                            END IF
     
                         END IF
@@ -601,16 +588,15 @@ CONTAINS
  
                         CALL cp_fm_create(matrix=mat_u, matrix_struct=fm_s, name='FULL WORK MATRIX')
                         CALL parallel_gemm("T", "N", ec%block(i)%n_ao, ec%block(j)%n_ao, ec%block(i)%n_ao, &
-                                           1.0_dp, dat(i)%matrix, ec%block(i)%hab(spin, id)%matrix, 0.0_dp, mat_u)
+                                           1.0_dp, dat(i), ec%block(i)%hab(spin, id), 0.0_dp, mat_u)
                         CALL parallel_gemm("N", "N", ec%block(i)%n_ao, ec%block(j)%n_ao, ec%block(j)%n_ao, &
-                                           1.0_dp, mat_u, dat(j)%matrix, 0.0_dp, ec%block(i)%hab(spin, id)%matrix)
+                                           1.0_dp, mat_u, dat(j), 0.0_dp, ec%block(i)%hab(spin, id))
  
                         ! Save coupling elements to binary data file
                         CALL pod_save_coupl_elements(ec, i, id, spin, unit_hab); 
  
                         ! Clean memory
                         CALL cp_fm_release(matrix=mat_u)
-                        NULLIFY (mat_u)
  
                      END IF
   
@@ -630,18 +616,15 @@ CONTAINS
          END IF
 
          ! Clean memory
-         IF (ASSOCIATED(dat)) THEN
+         IF (ALLOCATED(dat)) THEN
             DO i = 1, SIZE(dat)
-               IF (ASSOCIATED(dat(i)%matrix)) THEN
-                  CALL cp_fm_release(matrix=dat(i)%matrix)
-                  NULLIFY (dat(i)%matrix)
-               END IF
+               CALL cp_fm_release(matrix=dat(i))
             END DO
          END IF
       END DO
 
       ! Clean memory
-      IF (ASSOCIATED(dat)) &
+      IF (ALLOCATED(dat)) &
          DEALLOCATE (dat)
 
       ! Close output streams
@@ -653,8 +636,7 @@ CONTAINS
       ! Clean memory
       IF (ASSOCIATED(mat_h)) THEN
          DO i = 1, SIZE(mat_h)
-            IF (ASSOCIATED(mat_h(i)%matrix)) &
-               CALL cp_fm_release(matrix=mat_h(i)%matrix)
+            CALL cp_fm_release(matrix=mat_h(i))
          END DO
          IF (ASSOCIATED(mat_h)) &
             DEALLOCATE (mat_h)
