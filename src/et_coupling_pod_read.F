@@ -17,7 +17,6 @@ MODULE et_coupling_pod_read
                                               cp_fm_struct_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
                                               cp_fm_read_unformatted,&
-                                              cp_fm_p_type,&
                                               cp_fm_type
    USE et_coupling_pod_core,            ONLY: pod_block_diag,&
                                               pod_block_hamiltonian
@@ -57,7 +56,7 @@ CONTAINS
    SUBROUTINE pod_read_restart_tmat(mat, fm_s, desc, filename)
 
       ! Routine arguments
-      TYPE(cp_fm_type), POINTER                          :: mat
+      TYPE(cp_fm_type)                                   :: mat
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
       CHARACTER(LEN=*)                                   :: desc
       CHARACTER(LEN=default_path_length)                 :: filename
@@ -203,11 +202,6 @@ CONTAINS
          IF (ec%block(i)%n_hab_blocks > 0) THEN
             ALLOCATE (ec%block(i)%hab(n_spins, ec%block(i)%n_hab_blocks))
             CPASSERT(ASSOCIATED(ec%block(i)%hab))
-            DO j = 1, n_spins
-               DO k = 1, ec%block(i)%n_hab_blocks
-                  NULLIFY (ec%block(i)%hab(j, k)%matrix)
-               END DO
-            END DO
          END IF
       END DO
 
@@ -243,6 +237,8 @@ CONTAINS
             CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
             CALL cp_fm_struct_create(fmstruct=fm_s, para_env=para_env, context=blacs_env, &
                                      nrow_global=n_ao, ncol_global=n_mo)
+            NULLIFY(mo%mo_coeff)
+            ALLOCATE(mo%mo_coeff)
             CALL cp_fm_create(matrix=mo%mo_coeff, matrix_struct=fm_s, name='BLOCK STATES')
 
             CALL cp_fm_read_unformatted(mo%mo_coeff, unit_wfn)
@@ -275,10 +271,10 @@ CONTAINS
                   ! Memory allocation
                   CALL cp_fm_struct_create(fmstruct=fm_s, para_env=para_env, context=blacs_env, &
                                            nrow_global=ec%block(j)%n_ao, ncol_global=ec%block(k)%n_ao)
-                  CALL cp_fm_create(matrix=ec%block(j)%hab(i, id)%matrix, matrix_struct=fm_s, &
+                  CALL cp_fm_create(matrix=ec%block(j)%hab(i, id), matrix_struct=fm_s, &
                                     name='H_KS OFF-DIAGONAL BLOCK')
 
-                  CALL cp_fm_read_unformatted(ec%block(j)%hab(i, id)%matrix, unit_hab)
+                  CALL cp_fm_read_unformatted(ec%block(j)%hab(i, id), unit_hab)
 
                   id = id + 1
 
@@ -329,7 +325,7 @@ CONTAINS
       TYPE(et_cpl), POINTER                              :: ec
       INTEGER                                            :: n_spins
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(cp_fm_type), POINTER                          :: mat_w
+      TYPE(cp_fm_type)                                   :: mat_w
       INTEGER                                            :: n_ao
       CHARACTER(LEN=default_path_length)                 :: file_tmf, file_tmr, file_hab, file_wfn
       LOGICAL                                            :: blocks
@@ -340,7 +336,7 @@ CONTAINS
 
       ! Local variables
       INTEGER                                            :: handle
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_h
+      TYPE(cp_fm_type), DIMENSION(:), POINTER            :: mat_h
 
       ! Pointer initialization
       NULLIFY (mat_h)

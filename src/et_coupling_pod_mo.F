@@ -98,7 +98,7 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(:), POINTER               :: vec_t
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(cp_fm_type), POINTER                          :: mat_sc, mat_t
+      TYPE(cp_fm_type)                                   :: mat_sc, mat_t
       TYPE(mp_para_env_type), POINTER                    :: para_env
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mat_s
 
@@ -107,8 +107,6 @@ CONTAINS
       NULLIFY (para_env)
       NULLIFY (fm_s)
       NULLIFY (mat_s)
-      NULLIFY (mat_sc)
-      NULLIFY (mat_t)
       NULLIFY (vec_t)
 
       ! Time mark
@@ -169,7 +167,7 @@ CONTAINS
       TYPE(et_cpl), POINTER                              :: ec
       INTEGER                                            :: id
       TYPE(mo_set_type), POINTER                         :: mo
-      TYPE(cp_fm_type), POINTER                          :: mat_u
+      TYPE(cp_fm_type)                                   :: mat_u
       INTEGER                                            :: n_ao
       INTEGER                                            :: n_mo
 
@@ -180,7 +178,7 @@ CONTAINS
       ! Local variables
       INTEGER                                            :: ir, ic, jr, jc, nr, nc, handle
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
-      TYPE(cp_fm_type), POINTER                          :: mat_w
+      TYPE(cp_fm_type)                                   :: mat_w
       TYPE(mp_para_env_type), POINTER                    :: para_env
 #if defined(__SCALAPACK)
       INTEGER                                            :: is_p_row, is_p_col
@@ -211,7 +209,6 @@ CONTAINS
 
       NULLIFY (blacs_env)
       NULLIFY (para_env)
-      NULLIFY (mat_w)
 
       ! Working matrix
       CALL cp_fm_create(matrix=mat_w, matrix_struct=mo%mo_coeff%matrix_struct, &
@@ -289,7 +286,7 @@ CONTAINS
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_cpl), POINTER                              :: ec
       INTEGER                                            :: id, spin
-      TYPE(cp_fm_type), POINTER                          :: mat_u
+      TYPE(cp_fm_type)                                   :: mat_u
       REAL(KIND=dp), DIMENSION(:), POINTER               :: vec_e
 
       ! Routine name for debug purposes
@@ -359,6 +356,8 @@ CONTAINS
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
       CALL cp_fm_struct_create(fmstruct=fm_s, para_env=para_env, context=blacs_env, &
                                nrow_global=n_ao, ncol_global=n_mo)
+      NULLIFY(mo%mo_coeff)
+      ALLOCATE(mo%mo_coeff)
       CALL cp_fm_create(matrix=mo%mo_coeff, matrix_struct=fm_s, name='BLOCK STATES')
 
       ! Transform MO coefficients to original non-orthogonal basis set
@@ -495,7 +494,7 @@ CONTAINS
 
       ! Routine arguments
       TYPE(et_cpl_atom), DIMENSION(:), POINTER           :: blk_at
-      TYPE(cp_fm_type), POINTER                          :: mo
+      TYPE(cp_fm_type)                                   :: mo
       INTEGER                                            :: id
       INTEGER, DIMENSION(:), POINTER                     :: atom
 
