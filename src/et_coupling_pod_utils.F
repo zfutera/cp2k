@@ -61,7 +61,7 @@ CONTAINS
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(et_cpl), POINTER                              :: ec
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(cp_fm_type), POINTER                          :: mat_w
+      TYPE(cp_fm_type)                                   :: mat_w
       INTEGER                                            :: n_ao
 
       ! Routine name for debug purposes
@@ -72,7 +72,7 @@ CONTAINS
       INTEGER                                            :: i, n_deps, handle
       REAL(KIND=dp)                                      :: f
       REAL(KIND=dp), DIMENSION(:), ALLOCATABLE           :: et, ei
-      TYPE(cp_fm_type), POINTER                          :: mat_u
+      TYPE(cp_fm_type)                                   :: mat_u
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mat_s
       TYPE(scf_control_type), POINTER                    :: scf_cntrl
 #if defined(__SCALAPACK)
@@ -104,7 +104,6 @@ CONTAINS
 #endif
 
       ! Initialization
-      NULLIFY (mat_u)
       NULLIFY (mat_s)
       NULLIFY (scf_cntrl)
 
