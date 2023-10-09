@@ -21,7 +21,6 @@ MODULE et_coupling_pod
                                               cp_fm_struct_release,&
                                               cp_fm_struct_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
-                                              cp_fm_p_type,&
                                               cp_fm_release,&
                                               cp_fm_type
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
@@ -150,8 +149,6 @@ CONTAINS
       ec%n_atoms = 0
       ec%n_blocks = 0
       NULLIFY (ec%fermi)
-      NULLIFY (ec%tmatf)
-      NULLIFY (ec%tmatr)
       NULLIFY (ec%block)
 
       ! Number of atoms / atom types
@@ -298,9 +295,9 @@ CONTAINS
       INTEGER                                            :: i, j, k, n_ao, n_atoms, output_unit, handle
       LOGICAL                                            :: do_kp, restart, blocks_only
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_h
+      TYPE(cp_fm_type), DIMENSION(:), POINTER            :: mat_h
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(cp_fm_type), POINTER                          :: mat_w
+      TYPE(cp_fm_type)                                   :: mat_w
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(mp_para_env_type), POINTER                    :: para_env
       TYPE(dft_control_type), POINTER                    :: dft_cntrl
@@ -323,7 +320,6 @@ CONTAINS
 
       NULLIFY (fm_s)
       NULLIFY (mat_h)
-      NULLIFY (mat_w)
 
       NULLIFY (ec)
 
