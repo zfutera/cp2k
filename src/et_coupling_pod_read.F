@@ -354,7 +354,7 @@ CONTAINS
       ELSE
 
          ! Calculate the matrix elements from the overlap matrix
-         CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
+         CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w)
 
       END IF
 
