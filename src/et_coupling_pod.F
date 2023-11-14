@@ -485,7 +485,7 @@ CONTAINS
             ELSE
 
                ! Lowdin transformation matrices
-               CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
+               CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w)
                ! KS Hamiltonian
                CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
                                           n_ao, dft_cntrl%nspins)
@@ -561,7 +561,7 @@ CONTAINS
             ELSE
 
                ! Lowdin transformation matrices
-               CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
+               CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w)
                ! KS Hamiltonian
                CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
                                           n_ao, dft_cntrl%nspins)

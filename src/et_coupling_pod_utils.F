@@ -10,9 +10,7 @@
 MODULE et_coupling_pod_utils
 
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm
-   USE cp_fm_basic_linalg,              ONLY: cp_fm_syrk,&
-                                              cp_fm_upper_to_full
-   USE cp_fm_diag,                      ONLY: choose_eigv_solver
+   USE cp_fm_diag,                      ONLY: cp_fm_power
    USE cp_fm_struct,                    ONLY: cp_fm_struct_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
                                               cp_fm_release,&
@@ -51,10 +49,9 @@ CONTAINS
 !> \param ec electronic coupling data structure
 !> \param fm_s full-matrix structure used for allocation of transformation matrices
 !> \param mat_w working matrix of the same dimension
-!> \param n_ao number of atomic orbitLals (dimension of S matrix)
 !> \author Z. Futera (02.2017)
 ! **************************************************************************************************
-   SUBROUTINE pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
+   SUBROUTINE pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w)
 
       ! Routine arguments
       INTEGER                                            :: output_unit
@@ -62,173 +59,45 @@ CONTAINS
       TYPE(et_cpl), POINTER                              :: ec
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
       TYPE(cp_fm_type)                                   :: mat_w
-      INTEGER                                            :: n_ao
 
       ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_get_transf_mat', &
                                      routineP = moduleN//':'//routineN
 
       ! Local variables
-      INTEGER                                            :: i, n_deps, handle
-      REAL(KIND=dp)                                      :: f
-      REAL(KIND=dp), DIMENSION(:), ALLOCATABLE           :: et, ei
-      TYPE(cp_fm_type)                                   :: mat_u
+      INTEGER                                            :: n_deps, handle
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: mat_s
-      TYPE(scf_control_type), POINTER                    :: scf_cntrl
-#if defined(__SCALAPACK)
-      INTEGER, EXTERNAL                                  :: indxg2l, indxg2p
-
-      INTEGER                                            :: j, ic, ir, ic_loc, ir_loc
-      INTEGER                                            :: n_b_row, n_b_col
-      INTEGER                                            :: n_p_row, n_p_col
-      INTEGER                                            :: p_row_0, p_col_0
-      INTEGER                                            :: p_row_i, p_col_i
-#endif
 
       ! Time mark
       CALL timeset(routineN, handle)
 
-#if defined(__SCALAPACK)
-      ! Number of rows/columns in Scalapack blocks
-      n_b_row = mat_w%matrix_struct%nrow_block
-      n_b_col = mat_w%matrix_struct%ncol_block
-      ! Number of processors
-      n_p_row = mat_w%matrix_struct%context%num_pe(1)
-      n_p_col = mat_w%matrix_struct%context%num_pe(2)
-      ! Position of the first processor
-      p_row_0 = mat_w%matrix_struct%first_p_pos(1)
-      p_col_0 = mat_w%matrix_struct%first_p_pos(2)
-      ! Position of the actual processor
-      p_row_i = mat_w%matrix_struct%context%mepos(1)
-      p_col_i = mat_w%matrix_struct%context%mepos(2)
-#endif
-
       ! Initialization
       NULLIFY (mat_s)
-      NULLIFY (scf_cntrl)
 
-      ALLOCATE (et(n_ao))
-      ALLOCATE (ei(n_ao))
-      et(:) = 0.0_dp
-      ei(:) = 0.0_dp
-
-      ! Allocate memory for the transformation matrices
-      CALL cp_fm_create(matrix=ec%tmatf, matrix_struct=fm_s, &
-                        name='S^(-1/2) TRANSFORMATION MATRIX')
-      CALL cp_fm_create(matrix=ec%tmatr, matrix_struct=fm_s, &
-                        name='S^(+1/2) TRANSFORMATION MATRIX')
-
-      ! Diagonalization of S
+      ! Overlap matrix
       CALL get_qs_env(qs_env, matrix_s=mat_s)
-      CALL cp_fm_create(matrix=mat_u, matrix_struct=mat_w%matrix_struct, &
-                        name='OVERLAP MATRIX EIGENVECTORS')
-      CALL copy_dbcsr_to_fm(mat_s(1)%matrix, ec%tmatf)
-      CALL choose_eigv_solver(ec%tmatf, mat_w, et)
-      CALL cp_fm_to_fm(ec%tmatf, ec%tmatr)
-      ei(:) = et(:)
 
-      ! Eigenvector quenching
-      CALL get_qs_env(qs_env, scf_control=scf_cntrl)
-
-      n_deps = 0
-      DO i = 1, n_ao
-         IF (et(i) < scf_cntrl%eps_eigval) THEN
-#if defined(__SCALAPACK)
-            ic = indxg2p(i, n_b_col, p_col_i, p_col_0, n_p_col)
-            IF (p_col_i == ic) THEN
-               ic_loc = indxg2l(i, n_b_col, p_col_i, p_col_0, n_p_col)
-               DO j = 1, n_ao
-                  ir = indxg2p(j, n_b_row, p_row_i, p_row_0, n_p_row)
-                  IF (p_row_i == ir) THEN
-                     ir_loc = indxg2l(j, n_b_row, p_row_i, p_row_0, n_p_row)
-                     mat_w%local_data(ir_loc, ic_loc) = 0.0_dp
-                  END IF
-               END DO
-            END IF
-#else
-            mat_w%local_data(1:n_ao, i) = 0.0_dp
-#endif
-            n_deps = n_deps + 1
-         END IF
-      END DO
-
-      IF (n_deps /= 0) THEN
-         CALL cp_warn(__LOCATION__, &
-                      "Overlap matrix exhibits linear dependencies. At least some "// &
-                      "eigenvalues have been quenched.")
-      END IF
-
-      CALL cp_fm_to_fm(mat_w, mat_u)
-
-      ! Forward ransformations S^{-1/2}
+      ! Forward transformation matrix
       IF (output_unit > 0) &
          WRITE (output_unit, '(/,T3,A)') &
          'Constructing forward basis-set transformation matrix'
 
-      DO i = 1, n_ao
-         IF (et(i) >= scf_cntrl%eps_eigval) THEN
-            f = et(i)**(-0.25_dp)
-#if defined(__SCALAPACK)
-            ic = indxg2p(i, n_b_col, p_col_i, p_col_0, n_p_col)
-            IF (p_col_i == ic) THEN
-               ic_loc = indxg2l(i, n_b_col, p_col_i, p_col_0, n_p_col)
-               DO j = 1, n_ao
-                  ir = indxg2p(j, n_b_row, p_row_i, p_row_0, n_p_row)
-                  IF (p_row_i == ir) THEN
-                     ir_loc = indxg2l(j, n_b_row, p_row_i, p_row_0, n_p_row)
-                     mat_w%local_data(ir_loc, ic_loc) = f*mat_w%local_data(ir_loc, ic_loc)
-                  END IF
-               END DO
-            END IF
-#else
-            mat_w%local_data(1:n_ao, i) = f*mat_w%local_data(1:n_ao, i)
-#endif
-         END IF
-      END DO
+      CALL cp_fm_create(ec%tmatf, fm_s, name='S^(-1/2) TRANSFORMATION MATRIX')
+      CALL copy_dbcsr_to_fm(mat_s(1)%matrix, ec%tmatf)
+      CALL cp_fm_power(ec%tmatf, mat_w, -0.5d0, 0.0d0, n_deps)
 
-      CALL cp_fm_syrk("U", "N", n_ao, 1.0_dp, mat_w, 1, 1, 0.0_dp, ec%tmatf)
-      CALL cp_fm_upper_to_full(ec%tmatf, mat_w)
-
-      ! Save the forward-transformation matrix to file
       CALL pod_save_transf_mat(qs_env, ec, 'F')
 
-      ! Reverse transformation S^{+1/2}
+      ! Reverse transformation matrix
       IF (output_unit > 0) &
          WRITE (output_unit, '(T3,A)') &
          'Constructing reverse basis-set transformation matrix'
 
-      CALL cp_fm_to_fm(mat_u, mat_w)
-      DO i = 1, n_ao
-         IF (ei(i) >= scf_cntrl%eps_eigval) THEN
-            f = ei(i)**(+0.25_dp)
-#if defined(__SCALAPACK)
-            ic = indxg2p(i, n_b_col, p_col_i, p_col_0, n_p_col)
-            IF (p_col_i == ic) THEN
-               ic_loc = indxg2l(i, n_b_col, p_col_i, p_col_0, n_p_col)
-               DO j = 1, n_ao
-                  ir = indxg2p(j, n_b_row, p_row_i, p_row_0, n_p_row)
-                  IF (p_row_i == ir) THEN
-                     ir_loc = indxg2l(j, n_b_row, p_row_i, p_row_0, n_p_row)
-                     mat_w%local_data(ir_loc, ic_loc) = f*mat_w%local_data(ir_loc, ic_loc)
-                  END IF
-               END DO
-            END IF
-#else
-            mat_w%local_data(1:n_ao, i) = f*mat_w%local_data(1:n_ao, i)
-#endif
-         END IF
-      END DO
+      CALL cp_fm_create(ec%tmatr, fm_s, name='S^(+1/2) TRANSFORMATION MATRIX')
+      CALL copy_dbcsr_to_fm(mat_s(1)%matrix, ec%tmatr)
+      CALL cp_fm_power(ec%tmatr, mat_w, +0.5d0, 0.0d0, n_deps)
 
-      CALL cp_fm_syrk("U", "N", n_ao, 1.0_dp, mat_w, 1, 1, 0.0_dp, ec%tmatr)
-      CALL cp_fm_upper_to_full(ec%tmatr, mat_w)
-
-      ! Save the backward-transformation matrix to file
       CALL pod_save_transf_mat(qs_env, ec, 'B')
-
-      ! Clean memory
-      CALL cp_fm_release(matrix=mat_u)
-      DEALLOCATE (et)
-      DEALLOCATE (ei)
 
       ! Running time
       CALL timestop(handle)
