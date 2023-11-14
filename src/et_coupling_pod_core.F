@@ -83,83 +83,57 @@ CONTAINS
                                      routineP = moduleN//':'//routineN
 
       ! Local variables
-      INTEGER                                            :: ir, ic, jr, jc, kr, kc, nr, nc, handle
-#if defined(__SCALAPACK)
-      INTEGER                                            :: iw_p_row, iw_p_col, ih_p_row, ih_p_col
-      INTEGER                                            :: nw_p_rows, nw_p_cols, nh_p_rows, nh_p_cols
-      INTEGER                                            :: cw_row, cw_col, ch_row, ch_col
-      INTEGER                                            :: cw_row_f, cw_col_f, ch_row_f, ch_col_f
-      REAL(KIND=dp)                                      :: xh
-#endif
+      INTEGER                                            :: ia1, ia2, ib1, ib2, id1, id2, handle
+      INTEGER                                            :: is_r0, is_c0, is_r1, is_c1
+      INTEGER                                            :: it_r0, it_c0, it_r1, it_c1
 
       ! Time mark
       CALL timeset(routineN, handle)
 
-#if defined(__SCALAPACK)
-      IF (.NOT. cp_fm_struct_equivalent(mat_h%matrix_struct, mat_w%matrix_struct)) &
-         CPABORT('cannot reorder Hamiltonian, working-matrix structure is not equivalent')
-
-      ! number of processors
-      nw_p_rows = mat_w%matrix_struct%context%num_pe(1)
-      nw_p_cols = mat_w%matrix_struct%context%num_pe(2)
-      nh_p_rows = mat_h%matrix_struct%context%num_pe(1)
-      nh_p_cols = mat_h%matrix_struct%context%num_pe(2)
-
-      ! position of processors
-      cw_row = mat_w%matrix_struct%context%mepos(1)
-      cw_col = mat_w%matrix_struct%context%mepos(2)
-      ch_row = mat_h%matrix_struct%context%mepos(1)
-      ch_col = mat_h%matrix_struct%context%mepos(2)
-#endif
-
       ! Matrix-element reordering
-      nr = 1
-      ! Rows
-      DO ir = 1, ec%n_blocks
-         DO jr = 1, ec%block(ir)%n_atoms
-            DO kr = 1, ec%block(ir)%atom(jr)%n_ao
-               ! Columns
-               nc = 1
-               DO ic = 1, ec%n_blocks
-                  DO jc = 1, ec%block(ic)%n_atoms
-                     DO kc = 1, ec%block(ic)%atom(jc)%n_ao
-#if defined(__SCALAPACK)
-                        CALL infog2l(nr, nc, mat_w%matrix_struct%descriptor, &
-                                     nw_p_rows, nw_p_cols, cw_row, cw_col, &
-                                     iw_p_row, iw_p_col, cw_row_f, cw_col_f)
-                        CALL infog2l( &
-                           ec%block(ir)%atom(jr)%ao_pos + kr - 1, &
-                           ec%block(ic)%atom(jc)%ao_pos + kc - 1, &
-                           mat_h%matrix_struct%descriptor, &
-                           nh_p_rows, nh_p_cols, ch_row, ch_col, &
-                           ih_p_row, ih_p_col, ch_row_f, ch_col_f)
-                        ! Local H element
-                        IF ((ch_row_f == ch_row) .AND. (ch_col_f == ch_col)) THEN
-                           xh = mat_h%local_data(ih_p_row, ih_p_col)
-                           CALL mat_h%matrix_struct%context%dgebs2d('All', ' ', 1, 1, xh, 1)
-                           IF ((cw_row_f == cw_row) .AND. (cw_col_f == cw_col)) THEN
-                              mat_w%local_data(iw_p_row, iw_p_col) = xh
-                           END IF
-                           ! Remote H element
-                        ELSE
-                           CALL mat_h%matrix_struct%context%dgebr2d('All', ' ', 1, 1, xh, 1, &
-                                ch_row_f, ch_col_f)
-                           IF ((cw_row_f == cw_row) .AND. (cw_col_f == cw_col)) THEN
-                              mat_w%local_data(iw_p_row, iw_p_col) = xh
-                           END IF
-                        END IF
-#else
-                        mat_w%local_data(nr, nc) = mat_h%local_data( &
-                                                   ec%block(ir)%atom(jr)%ao_pos + kr - 1, &
-                                                   ec%block(ic)%atom(jc)%ao_pos + kc - 1)
-#endif
-                        nc = nc + 1
-                     END DO
-                  END DO
-               END DO
-               nr = nr + 1
+      id1 = 1
+      DO ib1 = 1, ec%n_blocks
+        ! Atoms
+        DO ia1 = 1, ec%block(ib1)%n_atoms
+          ! AOs - diagonal block
+          is_r0 = ec%block(ib1)%atom(ia1)%ao_pos
+          is_c0 = ec%block(ib1)%atom(ia1)%ao_pos
+          is_r1 = is_r0 + ec%block(ib1)%atom(ia1)%n_ao - 1
+          is_c1 = is_c0 + ec%block(ib1)%atom(ia1)%n_ao - 1
+          it_r0 = id1
+          it_c0 = id1
+          it_r1 = it_r0 + ec%block(ib1)%atom(ia1)%n_ao - 1
+          it_c1 = it_c0 + ec%block(ib1)%atom(ia1)%n_ao - 1
+          IF (is_r0.NE.it_r0 .OR. is_r1.NE.it_r1 .OR. is_c0.NE.it_c0 .OR. is_c1.NE.it_c1) THEN
+            CALL cp_fm_to_fm_submat(mat_h,mat_w, &
+                   ec%block(ib1)%atom(ia1)%n_ao,ec%block(ib1)%atom(ia1)%n_ao, &
+                   is_r0,is_c0,it_r0,it_c0)
+          END IF
+          ! Off-diagonal atom-atom AO blocks
+          id2 = 1
+          DO ib2 = 1, ib1
+            DO ia2 = 1, ec%block(ib2)%n_atoms
+              IF (ib2.LT.ib1 .OR. ia2.LT.ia1) THEN
+                is_r0 = ec%block(ib2)%atom(ia2)%ao_pos
+                is_c0 = ec%block(ib1)%atom(ia1)%ao_pos
+                is_r1 = is_r0 + ec%block(ib2)%atom(ia2)%n_ao - 1
+                is_c1 = is_c0 + ec%block(ib1)%atom(ia1)%n_ao - 1
+                it_r0 = id2
+                it_c0 = id1
+                it_r1 = it_r0 + ec%block(ib2)%atom(ia2)%n_ao - 1
+                it_c1 = it_c0 + ec%block(ib1)%atom(ia1)%n_ao - 1
+                IF (is_r0.NE.it_r0 .OR. is_r1.NE.it_r1 .OR. is_c0.NE.it_c0 .OR. is_c1.NE.it_c1) THEN
+                  CALL cp_fm_to_fm_submat(mat_h,mat_w, &
+                         ec%block(ib2)%atom(ia2)%n_ao,ec%block(ib1)%atom(ia1)%n_ao, &
+                         is_r0,is_c0,it_r0,it_c0)
+                END IF
+              END IF
+              id2 = id2 + ec%block(ib2)%atom(ia2)%n_ao
             END DO
-         END DO
+          END DO
+          ! Updated target-matrix position
+          id1 = id1 + ec%block(ib1)%atom(ia1)%n_ao
+        END DO
       END DO
 
       ! Copy the reordered matrix to original data array
