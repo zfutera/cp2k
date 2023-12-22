@@ -104,11 +104,9 @@ CONTAINS
           it_c0 = id1
           it_r1 = it_r0 + ec%block(ib1)%atom(ia1)%n_ao - 1
           it_c1 = it_c0 + ec%block(ib1)%atom(ia1)%n_ao - 1
-          IF (is_r0.NE.it_r0 .OR. is_r1.NE.it_r1 .OR. is_c0.NE.it_c0 .OR. is_c1.NE.it_c1) THEN
-            CALL cp_fm_to_fm_submat(mat_h,mat_w, &
-                   ec%block(ib1)%atom(ia1)%n_ao,ec%block(ib1)%atom(ia1)%n_ao, &
-                   is_r0,is_c0,it_r0,it_c0)
-          END IF
+          CALL cp_fm_to_fm_submat(mat_h,mat_w, &
+                 ec%block(ib1)%atom(ia1)%n_ao,ec%block(ib1)%atom(ia1)%n_ao, &
+                 is_r0,is_c0,it_r0,it_c0)
           ! Off-diagonal atom-atom AO blocks
           id2 = 1
           DO ib2 = 1, ib1
@@ -122,11 +120,9 @@ CONTAINS
                 it_c0 = id1
                 it_r1 = it_r0 + ec%block(ib2)%atom(ia2)%n_ao - 1
                 it_c1 = it_c0 + ec%block(ib1)%atom(ia1)%n_ao - 1
-                IF (is_r0.NE.it_r0 .OR. is_r1.NE.it_r1 .OR. is_c0.NE.it_c0 .OR. is_c1.NE.it_c1) THEN
-                  CALL cp_fm_to_fm_submat(mat_h,mat_w, &
-                         ec%block(ib2)%atom(ia2)%n_ao,ec%block(ib1)%atom(ia1)%n_ao, &
-                         is_r0,is_c0,it_r0,it_c0)
-                END IF
+                CALL cp_fm_to_fm_submat(mat_h,mat_w, &
+                       ec%block(ib2)%atom(ia2)%n_ao,ec%block(ib1)%atom(ia1)%n_ao, &
+                       is_r0,is_c0,it_r0,it_c0)
               END IF
               id2 = id2 + ec%block(ib2)%atom(ia2)%n_ao
             END DO
