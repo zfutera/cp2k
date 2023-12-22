@@ -360,6 +360,9 @@ CONTAINS
                ! Get coupling elements
                CALL cp_fm_get_submatrix(ec%block(i)%hab(1,id), d1, &
                       1, 1, MIN(ec%block(i)%n_ao, n_states), MIN(ec%block(j)%n_ao, n_states))
+               IF (SIZE(ec%block(i)%hab, 1) > 1) &
+                 CALL cp_fm_get_submatrix(ec%block(i)%hab(2,id), d2, &
+                        1, 1, MIN(ec%block(i)%n_ao, n_states), MIN(ec%block(j)%n_ao, n_states))
 
                ! Output
                IF (output_unit > 0) THEN
