@@ -9,14 +9,12 @@
 ! **************************************************************************************************
 MODULE et_coupling_pod_print
 
-   USE cp_blacs_calls,                  ONLY: cp_blacs_gridexit,&
-                                              cp_blacs_gridinfo,&
-                                              cp_blacs_gridinit
    USE cp_fm_types,                     ONLY: cp_fm_create,&
+                                              cp_fm_get_info,&
+                                              cp_fm_get_submatrix,&
                                               cp_fm_p_type,&
                                               cp_fm_release,&
                                               cp_fm_type
-   USE cp_gemm_interface,               ONLY: cp_gemm
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_type
    USE cp_output_handling,              ONLY: cp_p_file,&
@@ -27,14 +25,13 @@ MODULE et_coupling_pod_print
                                               section_vals_type,&
                                               section_vals_val_get
    USE kinds,                           ONLY: dp
-   USE message_passing,                 ONLY: mp_recv,&
-                                              mp_send
+   USE parallel_gemm_api,               ONLY: parallel_gemm
    USE physcon,                         ONLY: evolt
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
    USE qs_kind_types,                   ONLY: get_qs_kind_set,&
                                               qs_kind_type
-   USE qs_mo_types,                     ONLY: mo_set_p_type
+   USE qs_mo_types,                     ONLY: mo_set_type
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -74,7 +71,7 @@ CONTAINS
       INTEGER                                            :: j, k, l, m, n, n_ao, n_mo, handle
       INTEGER, DIMENSION(:), POINTER                     :: list_at, list_mo
       REAL(KIND=dp)                                      :: c1, c2
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_w
+      TYPE(cp_fm_type), DIMENSION(:), POINTER            :: mat_w
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(section_vals_type), POINTER                   :: block_sec, print_sec
 
@@ -82,6 +79,7 @@ CONTAINS
       CALL timeset(routineN, handle)
 
       ! Initialization
+      NULLIFY (mat_w)
       NULLIFY (block_sec)
       NULLIFY (print_sec)
       NULLIFY (qs_kind_set)
@@ -109,11 +107,11 @@ CONTAINS
          CPASSERT(ASSOCIATED(mat_w))
          DO j = 1, n_spins
             n_mo = ec%block(blk)%n_ao
-            CALL cp_fm_create(matrix=mat_w(j)%matrix, &
-                              matrix_struct=ec%block(blk)%mo(j)%mo_set%mo_coeff%matrix_struct, &
+            CALL cp_fm_create(matrix=mat_w(j), &
+                              matrix_struct=ec%block(blk)%mo(j)%mo_coeff%matrix_struct, &
                               name='BLOCK MOs IN ORTHONORMAL BASIS SET')
-            CALL cp_gemm("N", "N", n_ao, n_mo, n_ao, 1.0_dp, ec%tmatr, &
-                         ec%block(blk)%mo(j)%mo_set%mo_coeff, 0.0_dp, mat_w(j)%matrix)
+            CALL parallel_gemm("N", "N", n_ao, n_mo, n_ao, 1.0_dp, ec%tmatr, &
+                               ec%block(blk)%mo(j)%mo_coeff, 0.0_dp, mat_w(j))
          END DO
 
          DO j = 1, n
@@ -141,14 +139,14 @@ CONTAINS
                         DO l = 1, SIZE(list_mo)
 
                            IF (n_spins > 1) THEN
-                              c1 = pod_mo_sum_c2(ec%block(blk)%atom, mat_w(1)%matrix, &
+                              c1 = pod_mo_sum_c2(ec%block(blk)%atom, mat_w(1), &
                                                  list_mo(l), list_at)
-                              c2 = pod_mo_sum_c2(ec%block(blk)%atom, mat_w(2)%matrix, &
+                              c2 = pod_mo_sum_c2(ec%block(blk)%atom, mat_w(2), &
                                                  list_mo(l), list_at)
                               IF (output_unit > 0) &
                                  WRITE (output_unit, '(I5,A,I5,2F20.10)') j, ' /', list_mo(l), c1, c2
                            ELSE
-                              c1 = pod_mo_sum_c2(ec%block(blk)%atom, mat_w(1)%matrix, &
+                              c1 = pod_mo_sum_c2(ec%block(blk)%atom, mat_w(1), &
                                                  list_mo(l), list_at)
                               IF (output_unit > 0) &
                                  WRITE (output_unit, '(I5,A,I5,F20.10)') j, ' /', list_mo(l), c1
@@ -166,7 +164,7 @@ CONTAINS
 
          ! Clean memory
          DO j = 1, n_spins
-            CALL cp_fm_release(matrix=mat_w(j)%matrix)
+            CALL cp_fm_release(matrix=mat_w(j))
          END DO
          IF (ASSOCIATED(mat_w)) &
             DEALLOCATE (mat_w)
@@ -193,7 +191,7 @@ CONTAINS
 
       ! Routine arguments
       INTEGER                                            :: output_unit
-      TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mo
+      TYPE(mo_set_type), DIMENSION(:), POINTER           :: mo
       INTEGER                                            :: n_spins
       CHARACTER(LEN=*)                                   :: label
       INTEGER, OPTIONAL                                  :: mx_mo_a, mx_mo_b
@@ -221,26 +219,26 @@ CONTAINS
          ! Spin-polarized calculation
          IF (n_spins > 1) THEN
 
-            mx_a = mo(1)%mo_set%nmo
+            mx_a = mo(1)%nmo
             IF (PRESENT(mx_mo_a)) &
-               mx_a = MIN(mo(1)%mo_set%nmo, mx_mo_a)
-            mx_b = mo(2)%mo_set%nmo
+               mx_a = MIN(mo(1)%nmo, mx_mo_a)
+            mx_b = mo(2)%nmo
             IF (PRESENT(mx_mo_b)) &
-               mx_b = MIN(mo(2)%mo_set%nmo, mx_mo_b)
+               mx_b = MIN(mo(2)%nmo, mx_mo_b)
             n = MAX(mx_a, mx_b)
 
             DO i = 1, n
                WRITE (output_unit, '(T3,I10)', ADVANCE='no') i
                IF (i <= mx_a) THEN
                   WRITE (output_unit, '(2F12.4)', ADVANCE='no') &
-                     mo(1)%mo_set%occupation_numbers(i), mo(1)%mo_set%eigenvalues(i)
+                     mo(1)%occupation_numbers(i), mo(1)%eigenvalues(i)
                ELSE
                   WRITE (output_unit, '(A)', ADVANCE='no') '                        '
                END IF
                WRITE (output_unit, '(A)', ADVANCE='no') '     '
                IF (i <= mx_b) THEN
                   WRITE (output_unit, '(2F12.4)') &
-                     mo(2)%mo_set%occupation_numbers(i), mo(2)%mo_set%eigenvalues(i)
+                     mo(2)%occupation_numbers(i), mo(2)%eigenvalues(i)
                ELSE
                   WRITE (output_unit, *)
                END IF
@@ -248,25 +246,24 @@ CONTAINS
 
             IF (prnt_fm) THEN
                WRITE (output_unit, '(/,T3,I10,F24.4,I10,F19.4)') &
-                  mo(1)%mo_set%nelectron, mo(1)%mo_set%mu, &
-                  mo(2)%mo_set%nelectron, mo(2)%mo_set%mu
+                  mo(1)%nelectron, mo(1)%mu, mo(2)%nelectron, mo(2)%mu
             END IF
 
             ! Spin-restricted calculation
          ELSE
 
-            mx_a = mo(1)%mo_set%nmo
+            mx_a = mo(1)%nmo
             IF (PRESENT(mx_mo_a)) &
-               mx_a = MIN(mo(1)%mo_set%nmo, mx_mo_a)
+               mx_a = MIN(mo(1)%nmo, mx_mo_a)
 
             DO i = 1, mx_a
                WRITE (output_unit, '(T3,I10,2F12.4)') &
-                  i, mo(1)%mo_set%occupation_numbers(i), mo(1)%mo_set%eigenvalues(i)
+                  i, mo(1)%occupation_numbers(i), mo(1)%eigenvalues(i)
             END DO
 
             IF (prnt_fm) THEN
                WRITE (output_unit, '(/,T3,I10,F24.4)') &
-                  mo(1)%mo_set%nelectron, mo(1)%mo_set%mu
+                  mo(1)%nelectron, mo(1)%mu
             END IF
 
          END IF
@@ -308,34 +305,15 @@ CONTAINS
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(section_vals_type), POINTER                   :: et_proj_sec, print_key
 #if defined(__SCALAPACK)
-      INTEGER                                            :: n, cntxt_loc, info, tg1, tg2
-      INTEGER                                            :: ib, ix, ic, ir, ir_loc, ic_loc
-      INTEGER                                            :: n_b_row, n_b_col
-      INTEGER                                            :: n_p_row, n_p_col
-      INTEGER                                            :: n_t_row, n_t_col
-      INTEGER                                            :: p_row_i, p_col_i
-      INTEGER                                            :: p_row_0, p_col_0
-      INTEGER, DIMENSION(9)                              :: desc
-      REAL(KIND=dp), DIMENSION(:), POINTER               :: v1, v2
-      REAL(KIND=dp), DIMENSION(:, :), POINTER             :: d1, d2
-      TYPE(cp_fm_type), POINTER                          :: m1, m2
-
-      INTEGER, EXTERNAL                                  :: numroc
+      REAL(KIND=dp), DIMENSION(:, :), POINTER            :: d1, d2
 #endif
 
       ! Time mark
       CALL timeset(routineN, handle)
 
 #if defined(__SCALAPACK)
-      NULLIFY (m1)
-      NULLIFY (m2)
       NULLIFY (d1)
       NULLIFY (d2)
-      NULLIFY (v1)
-      NULLIFY (v2)
-
-      tg1 = 0
-      tg2 = 0
 #endif
 
       ! Initialization
@@ -354,7 +332,7 @@ CONTAINS
       has_cpl = .FALSE.
       DO i = 1, ec%n_blocks
         DO j = 1, ec%block(i)%n_hab_blocks
-          IF (ASSOCIATED(ec%block(i)%hab(1,j)%matrix)) THEN
+          IF (ASSOCIATED(ec%block(i)%hab)) THEN
             has_cpl = .TRUE.
             EXIT
           END IF
@@ -373,137 +351,49 @@ CONTAINS
             id = 1
             DO j = i + 1, ec%n_blocks
 
-               ! Matrix pointers
-               m1 => ec%block(i)%hab(1, id)%matrix
-               IF (SIZE(ec%block(i)%hab, 1) > 1) &
-                  m2 => ec%block(i)%hab(2, id)%matrix
-               ! Total number of rows/columns
-               n_t_row = m1%matrix_struct%nrow_global
-               n_t_col = m1%matrix_struct%ncol_global
-               ! Number of rows/columns in Scalapack blocks
-               n_b_row = m1%matrix_struct%nrow_block
-               n_b_col = m1%matrix_struct%ncol_block
-   
-               ! Context and descriptor
-               cntxt_loc = m1%matrix_struct%para_env%group
-               CALL cp_blacs_gridinit(cntxt_loc, 'R', 1, m1%matrix_struct%para_env%num_pe)
-               CALL cp_blacs_gridinfo(cntxt_loc, n_p_row, n_p_col, p_row_i, p_col_i)
-               CALL descinit(desc, n_t_row, n_t_col, n_b_row, n_t_col, 0, 0, cntxt_loc, n_t_row, info)
-               CPASSERT(info == 0)
-   
-               ! Number of rows on the actual processor
-               n = numroc(n_t_row, n_b_row, p_row_i, 0, n_p_row)
-   
                ! Local data arrays
-               ALLOCATE (d1(MAX(1, n), n_t_col))
-               ALLOCATE (v1(n_b_row*n_t_col))
-               v1 = HUGE(1.0_dp)
+               ALLOCATE(d1(MIN(ec%block(i)%n_ao, n_states), MIN(ec%block(j)%n_ao, n_states)))
                IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
-                  ALLOCATE (d2(MAX(1, n), n_t_col))
-                  ALLOCATE (v2(n_b_row*n_t_col))
-                  v2 = HUGE(1.0_dp)
+                 ALLOCATE(d2(MIN(ec%block(i)%n_ao, n_states), MIN(ec%block(j)%n_ao, n_states)))
                END IF
-   
-               ! Get the matrix elements
-               CALL pdgemr2d(n_t_row, n_t_col, m1%local_data(1, 1), 1, 1, &
-                             m1%matrix_struct%descriptor, &
-                             d1(1, 1), 1, 1, desc, cntxt_loc)
-               IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
-                  CALL pdgemr2d(n_t_row, n_t_col, m2%local_data(1, 1), 1, 1, &
-                                m2%matrix_struct%descriptor, &
-                                d2(1, 1), 1, 1, desc, cntxt_loc)
-               END IF
-   
-               ! Row / column index
-               k = 1
-               l = 1
-   
-               ! Loop over blocks of rows
-               DO ir = 1, n_t_row, MAX(n_b_row, 1)
-   
-                  ! Number of rows in the block
-                  ib = MIN(n_b_row, n_t_row - ir + 1)
-   
-                  ! Local element position
-                  CALL infog2l(ir, 1, desc, n_p_row, n_p_col, p_row_i, p_col_i, &
-                               ir_loc, ic_loc, p_row_0, p_col_0)
-   
-                  ! Save block-row columns
-                  IF (p_row_0 == p_row_i) THEN
-                     DO ix = 1, ib
-                        v1((ix - 1)*n_t_col + 1:n_t_col*ix) = d1(ir_loc + ix - 1, :)
-                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
-                           v2((ix - 1)*n_t_col + 1:n_t_col*ix) = d2(ir_loc + ix - 1, :)
+
+               ! Get coupling elements
+               CALL cp_fm_get_submatrix(ec%block(i)%hab(1,id), d1, &
+                      1, 1, MIN(ec%block(i)%n_ao, n_states), MIN(ec%block(j)%n_ao, n_states))
+               IF (SIZE(ec%block(i)%hab, 1) > 1) &
+                 CALL cp_fm_get_submatrix(ec%block(i)%hab(2,id), d2, &
+                        1, 1, MIN(ec%block(i)%n_ao, n_states), MIN(ec%block(j)%n_ao, n_states))
+
+               ! Output
+               IF (output_unit > 0) THEN
+
+                  DO k=1, MIN(ec%block(i)%n_ao, n_states)
+                     DO l=1, MIN(ec%block(j)%n_ao, n_states)
+                  
+                       ! First spin component
+                       WRITE (output_unit, '(T3,I3,A,I4,A,I1,A,I4,A,E20.6)', ADVANCE='no') &
+                          i, "[", k, "] - ", j, "[", l, "] ", &
+                          d1(k,l)*evolt*1000.0_dp
+                      
+                       ! Second spin component
+                       IF (SIZE(ec%block(i)%hab, 1) > 1 .AND. &
+                           k <= n_beta_states .AND. l <= n_beta_states) THEN
+                          WRITE (output_unit, '(E20.6)', ADVANCE='no') &
+                             d2(k,l)*evolt*1000.0_dp
+                       END IF
+                      
+                       WRITE (output_unit, *)
+                  
                      END DO
-                  END IF
+                  END DO
    
-                  ! Transfer data
-                  IF (p_row_0 /= 0) THEN
-                     IF (p_row_0 == p_row_i) THEN
-                        CALL mp_send(v1(:), 0, tg1, m1%matrix_struct%para_env%group)
-                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
-                           CALL mp_send(v2(:), 0, tg2, m2%matrix_struct%para_env%group)
-                     END IF
-                     IF (p_row_i == 0) THEN
-                        CALL mp_recv(v1(:), p_row_0, tg1, m1%matrix_struct%para_env%group)
-                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
-                           CALL mp_recv(v2(:), p_row_0, tg2, m2%matrix_struct%para_env%group)
-                     END IF
-                  END IF
-   
-                  ! Output
-                  IF (output_unit > 0) THEN
-                     DO ix = 1, ib
-                        DO ic = (ix - 1)*n_t_col + 1, n_t_col*ix
-   
-                           IF (k <= MIN(ec%block(i)%n_ao, n_states) .AND. &
-                               l <= MIN(ec%block(j)%n_ao, n_states)) THEN
-   
-                              WRITE (output_unit, '(T3,I3,A,I4,A,I1,A,I4,A,E20.6)', ADVANCE='no') &
-                                 i, "[", k, "] - ", j, "[", l, "] ", &
-                                 v1(ic)*evolt*1000.0_dp
-   
-                              ! Second spin component
-                              IF (SIZE(ec%block(i)%hab, 1) > 1 .AND. &
-                                  k <= n_beta_states .AND. l <= n_beta_states) THEN
-                                 WRITE (output_unit, '(E20.6)', ADVANCE='no') &
-                                    v2(ic)*evolt*1000.0_dp
-                              END IF
-   
-                              WRITE (output_unit, *)
-   
-                           END IF
-   
-                           ! Row / column IDs
-                           l = l + 1
-                           IF (l > n_t_col) THEN
-                              l = 1
-                              k = k + 1
-                           END IF
-   
-                        END DO
-                     END IF
-                     IF (p_row_i == 0) THEN
-                        CALL mp_recv(v1(:), p_row_0, tg1, m1%matrix_struct%para_env%group)
-                        IF (SIZE(ec%block(i)%hab, 1) > 1) &
-                           CALL mp_recv(v2(:), p_row_0, tg2, m2%matrix_struct%para_env%group)
-                     END IF
-                  END IF
-   
-               END DO
-   
-               ! clean memory
-               CALL cp_blacs_gridexit(cntxt_loc)
-   
+               END IF
+
                IF (ASSOCIATED(d1)) &
                   DEALLOCATE (d1)
-               IF (ASSOCIATED(v1)) &
-                  DEALLOCATE (v1)
                IF (SIZE(ec%block(i)%hab, 1) > 1) THEN
                   IF (ASSOCIATED(d2)) &
                      DEALLOCATE (d2)
-                  IF (ASSOCIATED(v2)) &
-                     DEALLOCATE (v2)
                END IF
 
                id = id + 1
@@ -526,10 +416,10 @@ CONTAINS
    
                            WRITE (output_unit, '(T3,I3,A,I4,A,I1,A,I4,A,E20.6)', ADVANCE='no') &
                               i, "[", k, "] - ", j, "[", l, "] ", &
-                              ec%block(i)%hab(1, id)%matrix%local_data(k, l)*evolt*1000.0_dp
+                              ec%block(i)%hab(1, id)%local_data(k, l)*evolt*1000.0_dp
                            IF ((k <= n_beta_states) .AND. (l <= n_beta_states)) THEN
                               WRITE (output_unit, '(E20.6)') &
-                                 ec%block(i)%hab(2, id)%matrix%local_data(k, l)*evolt*1000.0_dp
+                                 ec%block(i)%hab(2, id)%local_data(k, l)*evolt*1000.0_dp
                            ELSE
                               WRITE (output_unit, *)
                            END IF
@@ -538,7 +428,7 @@ CONTAINS
    
                            WRITE (output_unit, '(T3,I3,A,I4,A,I1,A,I4,A,E20.6)') &
                               i, "[", k, "] - ", j, "[", l, "] ", &
-                              ec%block(i)%hab(1, id)%matrix%local_data(k, l)*evolt*1000.0_dp
+                              ec%block(i)%hab(1, id)%local_data(k, l)*evolt*1000.0_dp
    
                         END IF
    

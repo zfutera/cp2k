@@ -21,7 +21,6 @@ MODULE et_coupling_pod
                                               cp_fm_struct_release,&
                                               cp_fm_struct_type
    USE cp_fm_types,                     ONLY: cp_fm_create,&
-                                              cp_fm_p_type,&
                                               cp_fm_release,&
                                               cp_fm_type
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
@@ -29,7 +28,6 @@ MODULE et_coupling_pod
                                               cp_to_string
    USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
                                               cp_print_key_unit_nr
-   USE cp_para_types,                   ONLY: cp_para_env_type
    USE et_coupling_pod_core,            ONLY: pod_block_diag,&
                                               pod_block_hamiltonian
    USE et_coupling_pod_print,           ONLY: pod_print_couplings,&
@@ -48,6 +46,7 @@ MODULE et_coupling_pod
    USE kinds,                           ONLY: default_path_length,&
                                               dp
    USE kpoint_types,                    ONLY: kpoint_type
+   USE message_passing,                 ONLY: mp_para_env_type
    USE orbital_pointers,                ONLY: nso
    USE particle_types,                  ONLY: particle_type
    USE qs_environment_types,            ONLY: get_qs_env,&
@@ -55,7 +54,7 @@ MODULE et_coupling_pod
    USE qs_kind_types,                   ONLY: get_qs_kind,&
                                               get_qs_kind_set,&
                                               qs_kind_type
-   USE qs_mo_types,                     ONLY: mo_set_p_type
+   USE qs_mo_types,                     ONLY: mo_set_type
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -84,6 +83,7 @@ CONTAINS
 
       ! Routine name for debug purposes
       CHARACTER(len=*), PARAMETER :: routineN = 'pod_set_fermi', routineP = moduleN//':'//routineN
+
 
       NULLIFY (ec%fermi)
 
@@ -149,8 +149,6 @@ CONTAINS
       ec%n_atoms = 0
       ec%n_blocks = 0
       NULLIFY (ec%fermi)
-      NULLIFY (ec%tmatf)
-      NULLIFY (ec%tmatr)
       NULLIFY (ec%block)
 
       ! Number of atoms / atom types
@@ -297,15 +295,15 @@ CONTAINS
       INTEGER                                            :: i, j, k, n_ao, n_atoms, output_unit, handle
       LOGICAL                                            :: do_kp, restart, blocks_only
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
-      TYPE(cp_fm_p_type), DIMENSION(:), POINTER          :: mat_h
+      TYPE(cp_fm_type), DIMENSION(:), POINTER            :: mat_h
       TYPE(cp_fm_struct_type), POINTER                   :: fm_s
-      TYPE(cp_fm_type), POINTER                          :: mat_w
+      TYPE(cp_fm_type)                                   :: mat_w
       TYPE(cp_logger_type), POINTER                      :: logger
-      TYPE(cp_para_env_type), POINTER                    :: para_env
+      TYPE(mp_para_env_type), POINTER                    :: para_env
       TYPE(dft_control_type), POINTER                    :: dft_cntrl
       TYPE(et_cpl), POINTER                              :: ec
       TYPE(kpoint_type), POINTER                         :: kpoints
-      TYPE(mo_set_p_type), DIMENSION(:), POINTER         :: mo
+      TYPE(mo_set_type), DIMENSION(:), POINTER           :: mo
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(section_vals_type), POINTER                   :: et_proj_sec
 
@@ -322,7 +320,6 @@ CONTAINS
 
       NULLIFY (fm_s)
       NULLIFY (mat_h)
-      NULLIFY (mat_w)
 
       NULLIFY (ec)
 
@@ -462,19 +459,19 @@ CONTAINS
 
             ! State eneries of the whole system
             CALL get_qs_env(qs_env, mos=mo)
-            IF (mo(1)%mo_set%nao /= mo(2)%mo_set%nao) &
+            IF (mo(1)%nao /= mo(2)%nao) &
                CPABORT('different number of alpha/beta AO basis functions')
             IF (output_unit > 0) THEN
                WRITE (output_unit, '(/,T3,A,I10)') &
-                  'Number of AO basis funtions        = ', mo(1)%mo_set%nao
+                  'Number of AO basis funtions        = ', mo(1)%nao
                WRITE (output_unit, '(T3,A,I10)') &
-                  'Number of alpha states             = ', mo(1)%mo_set%nmo
+                  'Number of alpha states             = ', mo(1)%nmo
                WRITE (output_unit, '(T3,A,I10)') &
-                  'Number of beta states              = ', mo(2)%mo_set%nmo
+                  'Number of beta states              = ', mo(2)%nmo
             END IF
             CALL pod_print_states(output_unit, mo, dft_cntrl%nspins, &
                                   'the whole system', fermi=.TRUE.)
-            CALL pod_set_fermi(ec, mo(1)%mo_set%mu, mo(2)%mo_set%mu)
+            CALL pod_set_fermi(ec, mo(1)%mu, mo(2)%mu)
 
             ! Read data from files
             IF (restart) THEN
@@ -488,7 +485,7 @@ CONTAINS
             ELSE
 
                ! Lowdin transformation matrices
-               CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
+               CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w)
                ! KS Hamiltonian
                CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
                                           n_ao, dft_cntrl%nspins)
@@ -503,14 +500,14 @@ CONTAINS
                IF (output_unit > 0) THEN
                   CALL pod_print_states(output_unit, ec%block(i)%mo, dft_cntrl%nspins, &
                                         'block '//TRIM(ADJUSTL(cp_to_string(i)))//' states', &
-                                        mx_mo_a=mo(1)%mo_set%nmo, mx_mo_b=mo(2)%mo_set%nmo, &
+                                        mx_mo_a=mo(1)%nmo, mx_mo_b=mo(2)%nmo, &
                                         fermi=.TRUE.)
                END IF
                CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
             END DO
 
             CALL pod_print_couplings(output_unit, qs_env, ec, &
-                                     mo(1)%mo_set%nmo, mo(2)%mo_set%nmo)
+                                     mo(1)%nmo, mo(2)%nmo)
 
             ! Save electronic states
             CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
@@ -544,13 +541,13 @@ CONTAINS
             CALL get_qs_env(qs_env, mos=mo)
             IF (output_unit > 0) THEN
                WRITE (output_unit, '(/,T3,A,I10)') &
-                  'Number of AO basis funtions        = ', mo(1)%mo_set%nao
+                  'Number of AO basis funtions        = ', mo(1)%nao
                WRITE (output_unit, '(T3,A,I10)') &
-                  'Number of states                   = ', mo(1)%mo_set%nmo
+                  'Number of states                   = ', mo(1)%nmo
             END IF
             CALL pod_print_states(output_unit, mo, dft_cntrl%nspins, &
                                   'the whole system', fermi=.TRUE.)
-            CALL pod_set_fermi(ec, mo(1)%mo_set%mu)
+            CALL pod_set_fermi(ec, mo(1)%mu)
 
             ! Read data from files
             IF (restart) THEN
@@ -564,7 +561,7 @@ CONTAINS
             ELSE
 
                ! Lowdin transformation matrices
-               CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w, n_ao)
+               CALL pod_get_transf_mat(output_unit, qs_env, ec, fm_s, mat_w)
                ! KS Hamiltonian
                CALL pod_block_hamiltonian(qs_env, ec, fm_s, mat_h, mat_w, &
                                           n_ao, dft_cntrl%nspins)
@@ -576,16 +573,16 @@ CONTAINS
 
             ! Print out energies 
             DO i = 1, ec%n_blocks
-               IF (ASSOCIATED(ec%block(i)%mo(1)%mo_set) .AND. output_unit > 0) THEN
+               IF (ASSOCIATED(ec%block(i)%mo) .AND. output_unit > 0) THEN
                   CALL pod_print_states(output_unit, ec%block(i)%mo, dft_cntrl%nspins, &
                                         'block '//TRIM(ADJUSTL(cp_to_string(i)))//' states', &
-                                        mx_mo_a=mo(1)%mo_set%nmo, fermi=.TRUE.)
+                                        mx_mo_a=mo(1)%nmo, fermi=.TRUE.)
                END IF
                CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
             END DO
 
             ! Print out coupling elements
-            CALL pod_print_couplings(output_unit, qs_env, ec, mo(1)%mo_set%nmo)
+            CALL pod_print_couplings(output_unit, qs_env, ec, mo(1)%nmo)
 
             ! Save electronic states
             CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
