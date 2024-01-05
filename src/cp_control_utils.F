@@ -430,6 +430,8 @@ CONTAINS
          dft_control%period_efield%d_filter(1:3) = pol(1:3)
          CALL section_vals_val_get(tmp_section, "INTENSITY", &
                                    r_val=dft_control%period_efield%strength)
+         CALL section_vals_val_get(tmp_section, "FREQUENCY", &
+                                   r_val=dft_control%period_efield%frequency)
          dft_control%period_efield%displacement_field = .FALSE.
          CALL section_vals_val_get(tmp_section, "DISPLACEMENT_FIELD", &
                                    l_val=dft_control%period_efield%displacement_field)

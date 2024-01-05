@@ -1695,8 +1695,8 @@ CONTAINS
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(particle_list_type), POINTER                  :: particles
       TYPE(pw_env_type), POINTER                         :: pw_env
-      TYPE(pw_p_type), DIMENSION(:), POINTER             :: v_tau_rspace,v_tau_rspace_aux
-      TYPE(pw_p_type), DIMENSION(:), POINTER             :: v_xc_rspace,v_xc_rspace_aux
+      TYPE(pw_type), DIMENSION(:), POINTER               :: v_tau_rspace,v_tau_rspace_aux
+      TYPE(pw_type), DIMENSION(:), POINTER               :: v_xc_rspace,v_xc_rspace_aux
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
       TYPE(qs_rho_type), POINTER                         :: rho
       TYPE(qs_subsys_type), POINTER                      :: subsys
@@ -1721,13 +1721,9 @@ CONTAINS
         CALL get_qs_env(qs_env, admm_env=admm_env)
         ! XC specification
         xc_section => admm_env%xc_section_aux
-        ! Density
-        IF (dft_control%qs_control%gapw_xc) THEN
-          CALL get_qs_env(qs_env=qs_env,rho_xc=rho)
-        ELSE
-          CALL get_qs_env(qs_env=qs_env,rho_aux_fit=rho)
-        END IF
         ! XC potential
+        IF (dft_control%qs_control%gapw_xc) &
+          CALL get_qs_env(qs_env=qs_env,rho_xc=rho)
         CALL qs_vxc_create(ks_env=ks_env,rho_struct=rho,xc_section=xc_section, &
                            vxc_rho=v_xc_rspace_aux,vxc_tau=v_tau_rspace_aux,exc=xc_energy)
 
@@ -1774,10 +1770,10 @@ CONTAINS
         END IF
 
         ! Volume element
-        udvol = 1.0_dp/v_xc_rspace(1)%pw%pw_grid%dvol
+        udvol = 1.0_dp/v_xc_rspace(1)%pw_grid%dvol
 
         ! Save data to the CUBE file
-        CALL cp_pw_to_cube(v_xc_rspace(1)%pw,unit_nr,"XC POTENTIAL",particles=particles, &
+        CALL cp_pw_to_cube(v_xc_rspace(1),unit_nr,"XC POTENTIAL",particles=particles, &
                            stride=section_get_ivals(dft_section,"PRINT%V_XC_CUBE%STRIDE"), &
                            mpi_io=mpi_io)
         CALL cp_print_key_finished_output(unit_nr,logger,input,"DFT%PRINT%V_XC_CUBE", &

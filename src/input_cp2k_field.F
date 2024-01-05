@@ -60,13 +60,20 @@ CONTAINS
                           " with OT. Can not be used in combination with RTP or EMD,"// &
                           " e.g. RESTART_RTP has to be .FALSE. when restarting the job.", &
                           citations=(/Souza2002, Umari2002/), &
-                          n_keywords=6, n_subsections=1, repeats=.TRUE.)
+                          n_keywords=7, n_subsections=1, repeats=.TRUE.)
 
       NULLIFY (keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="INTENSITY", &
                           description="Intensity of the electric field in a.u", &
                           usage="INTENSITY  0.001", &
+                          default_r_val=0._dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="FREQUENCY", &
+                          description="Frequency of the oscillating field in a.u", &
+                          usage="FREQUENCY  1.0", &
                           default_r_val=0._dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)

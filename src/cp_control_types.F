@@ -236,6 +236,7 @@ MODULE cp_control_types
       REAL(KIND=dp), DIMENSION(3)          :: polarisation = 0.0_dp
       REAL(KIND=dp), DIMENSION(3)          :: d_filter = 0.0_dp
       REAL(KIND=dp)                        :: strength = 0.0_dp
+      REAL(KIND=dp)                        :: frequency = 0.0_dp
    END TYPE period_efield_type
 
 ! **************************************************************************************************

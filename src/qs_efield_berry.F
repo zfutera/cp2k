@@ -595,6 +595,9 @@ CONTAINS
          END IF
          ener_field = ener_field + fpolvec(idir)*cqi(idir)
       END DO
+      IF (calculate_forces) THEN
+        write(*,'(A,F56.14)') '  Electric-field energy:',ener_field
+      END IF
 
       ! update the references
       IF (calculate_forces) THEN
@@ -737,6 +740,7 @@ CONTAINS
       fieldpol = dft_control%period_efield%polarisation
       fieldpol = fieldpol/SQRT(DOT_PRODUCT(fieldpol, fieldpol))
       fieldpol = fieldpol*dft_control%period_efield%strength
+      fieldpol = fieldpol*dcos(twopi*dft_control%period_efield%frequency*qs_env%sim_time)
 
       omega = cell%deth
       hmat = cell%hmat(:, :)/(twopi*omega)
