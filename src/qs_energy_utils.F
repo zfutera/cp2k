@@ -24,7 +24,7 @@ MODULE qs_energy_utils
                                               dbcsr_release,&
                                               dbcsr_set
    USE et_coupling,                     ONLY: calc_et_coupling
-   USE et_coupling_proj,                ONLY: calc_et_coupling_proj
+   USE et_coupling_pod,                 ONLY: pod_coupling_calc
    USE hartree_local_methods,           ONLY: Vh_1c_gg_integrals
    USE hartree_local_types,             ONLY: ecoul_1center_type
    USE input_section_types,             ONLY: section_vals_get,&
@@ -155,7 +155,7 @@ CONTAINS
          section_vals_get_subs_vals(input, "PROPERTIES%ET_COUPLING%PROJECTION")
       CALL section_vals_get(proj_section, explicit=do_et_proj)
       IF (do_et_proj) THEN
-         CALL calc_et_coupling_proj(qs_env)
+         CALL pod_coupling_calc(qs_env)
       END IF
 
       ! **********  Calculate the electron transfer coupling elements********
