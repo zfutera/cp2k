@@ -10,6 +10,7 @@
 MODULE et_coupling_pod_core
 
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
+   USE cp_dbcsr_api,                    ONLY: dbcsr_p_type
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm
    USE cp_fm_diag,                      ONLY: choose_eigv_solver
    USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
@@ -29,7 +30,6 @@ MODULE et_coupling_pod_core
    USE cp_output_handling,              ONLY: cp_print_key_finished_output,&
                                               cp_print_key_generate_filename,&
                                               cp_print_key_unit_nr
-   USE dbcsr_api,                       ONLY: dbcsr_p_type
    USE et_coupling_pod_mo,              ONLY: pod_mo_set
    USE et_coupling_pod_save,            ONLY: pod_save_coupl_close,&
                                               pod_save_coupl_elements,&
