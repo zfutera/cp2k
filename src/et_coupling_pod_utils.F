@@ -9,6 +9,7 @@
 ! **************************************************************************************************
 MODULE et_coupling_pod_utils
 
+   USE cp_dbcsr_api,                    ONLY: dbcsr_p_type
    USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm
    USE cp_fm_diag,                      ONLY: cp_fm_power
    USE cp_fm_struct,                    ONLY: cp_fm_struct_type
@@ -18,7 +19,6 @@ MODULE et_coupling_pod_utils
                                               cp_fm_type
    USE cp_log_handling,                 ONLY: cp_logger_type
    USE cp_output_handling,              ONLY: cp_print_key_generate_filename
-   USE dbcsr_api,                       ONLY: dbcsr_p_type
    USE et_coupling_pod_save,            ONLY: pod_save_transf_mat
    USE et_coupling_pod_types,           ONLY: et_cpl
    USE input_section_types,             ONLY: section_get_lval,&
