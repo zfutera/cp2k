@@ -116,7 +116,8 @@ MODULE negf_methods
                                               qs_environment_type
    USE qs_gspace_mixing,                ONLY: gspace_mixing
    USE qs_ks_methods,                   ONLY: qs_ks_build_kohn_sham_matrix
-   USE qs_mixing_utils,                 ONLY: mixing_allocate,&
+   USE qs_mixing_utils,                 ONLY: charge_mixing_init,&
+                                              mixing_allocate,&
                                               mixing_init
    USE qs_rho_methods,                  ONLY: qs_rho_update_rho
    USE qs_rho_types,                    ONLY: qs_rho_get,&
@@ -1038,10 +1039,12 @@ CONTAINS
       ! mixing storage allocation
       IF (negf_env%mixing_method >= gspace_mixing_nr) THEN
          CALL mixing_allocate(qs_env, negf_env%mixing_method, nspins=nspins, mixing_store=negf_env%mixing_storage)
-         IF (dft_control%qs_control%dftb .OR. dft_control%qs_control%xtb) THEN
-            CPABORT('TB Code not available')
+         IF (dft_control%qs_control%dftb) THEN
+            CPABORT('DFTB Code not available')
          ELSE IF (dft_control%qs_control%semi_empirical) THEN
             CPABORT('SE Code not possible')
+         ELSE IF (dft_control%qs_control%xtb) THEN
+            CALL charge_mixing_init(negf_env%mixing_storage)
          ELSE
             CALL mixing_init(negf_env%mixing_method, rho_struct, negf_env%mixing_storage, para_env)
          END IF
