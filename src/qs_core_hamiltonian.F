@@ -87,10 +87,18 @@ MODULE qs_core_hamiltonian
         dbcsr_iterator_next_block, dbcsr_iterator_start, dbcsr_iterator_stop, dbcsr_iterator_type, &
         dbcsr_p_type, dbcsr_set, dbcsr_type, dbcsr_type_antisymmetric
    USE cp_dbcsr_cp2k_link,              ONLY: cp_dbcsr_alloc_block_from_nbl
-   USE cp_dbcsr_operations,             ONLY: dbcsr_allocate_matrix_set,&
+   USE cp_dbcsr_operations,             ONLY: copy_dbcsr_to_fm,&
+                                              dbcsr_allocate_matrix_set,&
                                               dbcsr_deallocate_matrix_set
    USE cp_dbcsr_output,                 ONLY: cp_dbcsr_write_matrix_dist,&
                                               cp_dbcsr_write_sparse_matrix
+   USE cp_fm_types,                     ONLY: cp_fm_create,&
+                                              cp_fm_release,&
+                                              cp_fm_type,&
+                                              cp_fm_write_unformatted
+   USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
+                                              cp_fm_struct_release,&
+                                              cp_fm_struct_type
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_type
    USE cp_output_handling,              ONLY: cp_p_file,&
@@ -106,6 +114,7 @@ MODULE qs_core_hamiltonian
    USE kg_environment_types,            ONLY: kg_environment_type
    USE kg_tnadd_mat,                    ONLY: build_tnadd_mat
    USE kinds,                           ONLY: default_string_length,&
+                                              default_path_length,&
                                               dp
    USE kpoint_types,                    ONLY: get_kpoint_info,&
                                               kpoint_type
@@ -118,6 +127,7 @@ MODULE qs_core_hamiltonian
                                               set_qs_env
    USE qs_force_types,                  ONLY: qs_force_type
    USE qs_kind_types,                   ONLY: get_qs_kind,&
+                                              get_qs_kind_set,&
                                               qs_kind_type
    USE qs_kinetic,                      ONLY: build_kinetic_matrix
    USE qs_ks_types,                     ONLY: get_ks_env,&
@@ -572,12 +582,17 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'dump_info_core_hamiltonian'
 
-      INTEGER                                            :: after, handle, i, ic, iw, output_unit
-      LOGICAL                                            :: omit_headers
+      INTEGER                                            :: after, handle, i, ic, iw, output_unit, n_ao
+      LOGICAL                                            :: omit_headers, binary
+      CHARACTER(len=default_path_length)                 :: filename
+      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(cp_fm_struct_type), POINTER                   :: fm_s
+      TYPE(cp_fm_type)                                   :: mat_s
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_v
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrixkp_h, matrixkp_s, matrixkp_t
       TYPE(mp_para_env_type), POINTER                    :: para_env
+      TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
 
       CALL timeset(routineN, handle)
 
@@ -602,28 +617,56 @@ CONTAINS
       ! Print the overlap integral matrix, if requested
       IF (BTEST(cp_print_key_should_output(logger%iter_info, &
                                            qs_env%input, "DFT%PRINT%AO_MATRICES/OVERLAP"), cp_p_file)) THEN
-         iw = cp_print_key_unit_nr(logger, qs_env%input, "DFT%PRINT%AO_MATRICES/OVERLAP", &
-                                   extension=".Log")
-         CALL section_vals_val_get(qs_env%input, "DFT%PRINT%AO_MATRICES%NDIGITS", i_val=after)
-         after = MIN(MAX(after, 1), 16)
-         CALL get_qs_env(qs_env, matrix_s_kp=matrixkp_s)
-         IF (ASSOCIATED(matrixkp_s)) THEN
-            DO ic = 1, SIZE(matrixkp_s, 2)
-               CALL cp_dbcsr_write_sparse_matrix(matrixkp_s(1, ic)%matrix, 4, after, qs_env, para_env, &
-                                                 output_unit=iw, omit_headers=omit_headers)
-            END DO
-            IF (BTEST(cp_print_key_should_output(logger%iter_info, qs_env%input, &
-                                                 "DFT%PRINT%AO_MATRICES/DERIVATIVES"), cp_p_file)) THEN
-               DO ic = 1, SIZE(matrixkp_s, 2)
-                  DO i = 2, SIZE(matrixkp_s, 1)
-                     CALL cp_dbcsr_write_sparse_matrix(matrixkp_s(i, ic)%matrix, 4, after, qs_env, para_env, &
-                                                       output_unit=iw, omit_headers=omit_headers)
-                  END DO
-               END DO
-            END IF
+         ! Binary output file
+         CALL section_vals_val_get(qs_env%input, "DFT%PRINT%AO_MATRICES%FILENAME", c_val=filename)
+         CALL section_vals_val_get(qs_env%input, "DFT%PRINT%AO_MATRICES%BINARY", l_val=binary)
+         IF (LEN(TRIM(filename)) .gt. 0 .and. binary) THEN
+           iw = cp_print_key_unit_nr(logger, qs_env%input, "DFT%PRINT%AO_MATRICES/OVERLAP", &
+                                     extension=".Bin", file_form='UNFORMATTED', &
+                                     file_position='REWIND', file_action='WRITE', file_status='REPLACE')
+           CALL get_qs_env(qs_env, matrix_s_kp=matrixkp_s)
+           IF (ASSOCIATED(matrixkp_s)) THEN
+              CALL get_qs_env(qs_env, qs_kind_set=qs_kind_set, blacs_env=blacs_env)
+              CALL get_qs_kind_set(qs_kind_set, nsgf=n_ao)
+              CALL cp_fm_struct_create(fmstruct=fm_s, para_env=para_env, context=blacs_env, &
+                                       nrow_global=n_ao, ncol_global=n_ao)
+              CALL cp_fm_create(matrix=mat_s, matrix_struct=fm_s, &
+                                name='OVERLAP MATRIX')
+              DO ic = 1, SIZE(matrixkp_s, 2)
+                CALL copy_dbcsr_to_fm(matrixkp_s(1, ic)%matrix, mat_s)
+                CALL cp_fm_write_unformatted(mat_s, iw)
+              END DO
+              CALL cp_fm_struct_release(fmstruct=fm_s)
+              CALL cp_fm_release(matrix=mat_s)
+           END IF
+           CALL cp_print_key_finished_output(iw, logger, qs_env%input, &
+                                             "DFT%PRINT%AO_MATRICES/OVERLAP")
+
+         ! Text file or print out to LOG file
+         ELSE
+             iw = cp_print_key_unit_nr(logger, qs_env%input, "DFT%PRINT%AO_MATRICES/OVERLAP", &
+                                       extension=".Log")
+             CALL section_vals_val_get(qs_env%input, "DFT%PRINT%AO_MATRICES%NDIGITS", i_val=after)
+             after = MIN(MAX(after, 1), 16)
+             CALL get_qs_env(qs_env, matrix_s_kp=matrixkp_s)
+             IF (ASSOCIATED(matrixkp_s)) THEN
+                DO ic = 1, SIZE(matrixkp_s, 2)
+                   CALL cp_dbcsr_write_sparse_matrix(matrixkp_s(1, ic)%matrix, 4, after, qs_env, para_env, &
+                                                     output_unit=iw, omit_headers=omit_headers)
+                END DO
+                IF (BTEST(cp_print_key_should_output(logger%iter_info, qs_env%input, &
+                                                     "DFT%PRINT%AO_MATRICES/DERIVATIVES"), cp_p_file)) THEN
+                   DO ic = 1, SIZE(matrixkp_s, 2)
+                      DO i = 2, SIZE(matrixkp_s, 1)
+                         CALL cp_dbcsr_write_sparse_matrix(matrixkp_s(i, ic)%matrix, 4, after, qs_env, para_env, &
+                                                           output_unit=iw, omit_headers=omit_headers)
+                      END DO
+                   END DO
+                END IF
+             END IF
+             CALL cp_print_key_finished_output(iw, logger, qs_env%input, &
+                                               "DFT%PRINT%AO_MATRICES/OVERLAP")
          END IF
-         CALL cp_print_key_finished_output(iw, logger, qs_env%input, &
-                                           "DFT%PRINT%AO_MATRICES/OVERLAP")
       END IF
 
       ! Print the kinetic energy integral matrix, if requested
