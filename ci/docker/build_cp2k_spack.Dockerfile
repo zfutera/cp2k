@@ -1,80 +1,49 @@
 # Dockerfile for CP2K continuous integration (CI) runs
 #
-# A stand-alone docker build in this folder can be performed using the command:
-# docker build -f build_cp2k_spack.Dockerfile ../../
+# A stand-alone build in this folder can be performed with:
+# podman build --build-arg DEPS_IMAGE=<image id> --shm-size=1g -f build_cp2k_spack.Dockerfile ../../
 #
-# Author: Matthias Krack
+# Author: Matthias Krack (MK)
 #
-# Stage 2a: Build CP2K
 
-ARG BASE_IMAGE="ubuntu:24.04"
-ARG DEPS_IMAGE=""
+ARG BASE_IMAGE=${BASE_IMAGE:-ubuntu:24.04}
+ARG DEPS_IMAGE=${DEPS_IMAGE:-}
 
-FROM ${DEPS_IMAGE} AS build_cp2k
+###### Stage 2: Build CP2K ######
 
-# Store build arguments from base image needed in next stage
-RUN echo "${CP2K_VERSION}" >/CP2K_VERSION
+FROM "${DEPS_IMAGE}" AS build_cp2k
 
-# Build CP2K with CMake
+# Setup CUDA environment
+ENV CUDA_HOME=/usr/local/cuda
+ENV LD_LIBRARY_PATH="${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}"
+
+# Retrieve the number of available CPU cores
+ARG NUM_PROCS
+ENV NUM_PROCS=${NUM_PROCS:-32}
+
+ARG FEATURE_FLAGS
+ENV FEATURE_FLAGS=${FEATURE_FLAGS:-}
+
+# Build CP2K
 WORKDIR /opt/cp2k
-COPY ./CMakeLists.txt ./
-COPY ./benchmarks/CI ./benchmarks/CI
-COPY ./cmake ./cmake
-COPY ./data ./data
-COPY ./src ./src
-COPY ./tests ./tests
-COPY ./tools/build_utils ./tools/build_utils
+RUN ./make_cp2k.sh -cray -cv ${CP2K_VERSION} -dlc -j${NUM_PROCS} ${FEATURE_FLAGS}
 
-# Run CMake
-RUN /bin/bash -c -o pipefail "source ./cmake/cmake_cp2k.sh spack_${CP2K_BUILD_TYPE} ${CP2K_VERSION}"
+###### Stage 3: Install CP2K ######
 
-# Compile CP2K
-WORKDIR /opt/cp2k/build
-RUN /bin/bash -c -o pipefail " \
-    echo -e '\nCompiling CP2K ... \c'; \
-    if ninja --verbose &>ninja.log; then \
-      echo -e 'done\n'; \
-      echo -e 'Installing CP2K ... \c'; \
-      if ninja --verbose install &>install.log; then \
-        echo -e 'done\n'; \
-      else \
-        echo -e 'failed\n'; \
-        tail -n ${LOG_LINES} install.log; \
-      fi; \
-    else \
-      echo -e 'failed\n'; \
-      tail -n ${LOG_LINES} ninja.log; \
-    fi; \
-    cat cmake.log ninja.log install.log | gzip >build_cp2k.log.gz"
+FROM "${BASE_IMAGE}" AS install_cp2k
 
-# Stage 2b: Install CP2K
-FROM ${BASE_IMAGE} AS install_cp2k
-
-# Install required packages
 RUN apt-get update -qq && apt-get install -qq --no-install-recommends \
-    g++ \
-    gcc \
-    gfortran \
-    hwloc \
-    libhwloc-dev \
-    python3 && rm -rf /var/lib/apt/lists/*
+    g++ gcc gfortran \
+    python3 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Import build arguments from base image
-COPY --from=build_cp2k /CP2K_VERSION /
-
-# Install CP2K dependencies built with Spack
-WORKDIR /opt
-COPY --from=build_cp2k /opt/spack ./spack
-
-# Install CP2K binaries
 WORKDIR /opt/cp2k
-COPY --from=build_cp2k /opt/cp2k/bin ./bin
 
-# Install CP2K libraries
-COPY --from=build_cp2k /opt/cp2k/lib ./lib
+# Install CP2K dependencies built with spack
+COPY --from=build_cp2k /opt/cp2k/spack/spack/opt/spack ./spack/spack/opt/spack
 
-# Install CP2K database files
-COPY --from=build_cp2k /opt/cp2k/share ./share
+# Install CP2K
+COPY --from=build_cp2k /opt/cp2k/install ./install
 
 # Install CP2K regression tests
 COPY --from=build_cp2k /opt/cp2k/tests ./tests
@@ -83,35 +52,11 @@ COPY --from=build_cp2k /opt/cp2k/src/grid/sample_tasks ./src/grid/sample_tasks
 # Install CP2K/Quickstep CI benchmarks
 COPY --from=build_cp2k /opt/cp2k/benchmarks/CI ./benchmarks/CI
 
-# Import compressed build log file
-COPY --from=build_cp2k /opt/cp2k/build/build_cp2k.log.gz /opt/cp2k/build/build_cp2k.log.gz
+# Do not rely only on LD_LIBRARY_PATH because it is fragile
+COPY --from=build_cp2k /etc/ld.so.conf.d/cp2k.conf /etc/ld.so.conf.d/cp2k.conf
+RUN ldconfig
 
-# Create links to CP2K binaries
-WORKDIR /opt/cp2k/bin
-RUN CP2K_VERSION=$(cat /CP2K_VERSION) && \
-    ln -sf cp2k.${CP2K_VERSION} cp2k && \
-    ln -sf cp2k.${CP2K_VERSION} cp2k.$(echo ${CP2K_VERSION} | sed "s/smp/opt/") && \
-    ln -sf cp2k.${CP2K_VERSION} cp2k_shell
-
-# Update library search path
-RUN echo "/opt/cp2k/lib\n/opt/spack/lib\n$(dirname $(find /opt/spack/lib -name libtorch.so 2>/dev/null || true) 2>/dev/null || true)" >/etc/ld.so.conf.d/cp2k.conf && ldconfig
-
-# Create entrypoint script file
-RUN printf "#!/bin/bash\n\
-ulimit -c 0 -s unlimited\n\
-\
-export OMP_STACKSIZE=64M\n\
-export PATH=/opt/cp2k/bin:/opt/spack/bin:\${PATH}\n\
-\"\$@\"" \
->/opt/cp2k/bin/entrypoint.sh && chmod 755 /opt/cp2k/bin/entrypoint.sh
-
-# Create shortcut for regression test
-RUN printf "/opt/cp2k/tests/do_regtest.py \$* /opt/cp2k/bin $(cat /CP2K_VERSION)" \
->/opt/cp2k/bin/run_tests && chmod 755 /opt/cp2k/bin/run_tests
-
-# Define entrypoint
+# Create entrypoint and finalise container build
 WORKDIR /mnt
-ENTRYPOINT ["/opt/cp2k/bin/entrypoint.sh"]
-CMD ["cp2k", "--help"]
-
-# EOF
+ENTRYPOINT ["/opt/cp2k/install/bin/launch"]
+CMD ["cp2k", "--help", "--version"]

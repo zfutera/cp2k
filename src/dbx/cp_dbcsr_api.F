@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -55,6 +55,8 @@ MODULE cp_dbcsr_api
         dbm_scale, dbm_type, dbm_zero
    USE kinds,                           ONLY: dp,&
                                               int_8
+   USE mathconstants,                   ONLY: gaussi,&
+                                              z_one
    USE message_passing,                 ONLY: mp_comm_type
 #include "../base/base_uses.f90"
 
@@ -169,7 +171,7 @@ MODULE cp_dbcsr_api
 
    TYPE dbcsr_p_type
       TYPE(dbcsr_type), POINTER :: matrix => Null()
-   END TYPE
+   END TYPE dbcsr_p_type
 
    TYPE dbcsr_type
       PRIVATE
@@ -306,7 +308,7 @@ CONTAINS
       ELSE
          CALL dbm_clear(matrix%dbm)
       END IF
-   END SUBROUTINE
+   END SUBROUTINE dbcsr_clear
 
 ! **************************************************************************************************
 !> \brief ...
@@ -436,11 +438,19 @@ CONTAINS
       LOGICAL, INTENT(IN), OPTIONAL                      :: reuse_arrays, mutable_work
 
       IF (USE_DBCSR_BACKEND) THEN
-         CALL dbcsr_create_prv(matrix=matrix%dbcsr, name=name, template=template%dbcsr, &
-                               dist=dist%dbcsr, matrix_type=matrix_type, &
-                               row_blk_size=row_blk_size, col_blk_size=col_blk_size, &
-                               nze=0, data_type=dbcsr_type_real_8, reuse_arrays=reuse_arrays, &
-                               mutable_work=mutable_work)
+         IF (PRESENT(dist)) THEN
+            CALL dbcsr_create_prv(matrix=matrix%dbcsr, name=name, template=template%dbcsr, &
+                                  dist=dist%dbcsr, matrix_type=matrix_type, &
+                                  row_blk_size=row_blk_size, col_blk_size=col_blk_size, &
+                                  nze=0, data_type=dbcsr_type_real_8, reuse_arrays=reuse_arrays, &
+                                  mutable_work=mutable_work)
+         ELSE
+            CALL dbcsr_create_prv(matrix=matrix%dbcsr, name=name, template=template%dbcsr, &
+                                  matrix_type=matrix_type, &
+                                  row_blk_size=row_blk_size, col_blk_size=col_blk_size, &
+                                  nze=0, data_type=dbcsr_type_real_8, reuse_arrays=reuse_arrays, &
+                                  mutable_work=mutable_work)
+         END IF
       ELSE
          CPABORT("Not yet implemented for DBM.")
       END IF
@@ -487,9 +497,6 @@ CONTAINS
       TYPE(dbcsr_csr_type), INTENT(INOUT)                :: csr_mat
       INTEGER                                            :: dist_format
 
-      COMPLEX(KIND=dp), PARAMETER :: ione = CMPLX(0.0_dp, 1.0_dp, KIND=dp), &
-         rone = CMPLX(1.0_dp, 0.0_dp, KIND=dp)
-
       TYPE(dbcsr_type)                                   :: cmatrix, tmp_matrix
 
       IF (USE_DBCSR_BACKEND) THEN
@@ -497,7 +504,7 @@ CONTAINS
          CALL dbcsr_create_prv(cmatrix%dbcsr, template=rmatrix%dbcsr, data_type=dbcsr_type_complex_8)
          CALL dbcsr_copy_prv(cmatrix%dbcsr, rmatrix%dbcsr)
          CALL dbcsr_copy_prv(tmp_matrix%dbcsr, imatrix%dbcsr)
-         CALL dbcsr_add_prv(cmatrix%dbcsr, tmp_matrix%dbcsr, rone, ione)
+         CALL dbcsr_add_prv(cmatrix%dbcsr, tmp_matrix%dbcsr, z_one, gaussi)
          CALL dbcsr_release_prv(tmp_matrix%dbcsr)
          ! Convert to csr
          CALL dbcsr_csr_create_from_dbcsr_prv(cmatrix%dbcsr, csr_mat, dist_format)
@@ -614,8 +621,14 @@ CONTAINS
       LOGICAL, INTENT(IN), OPTIONAL                      :: reuse_arrays
 
       IF (USE_DBCSR_BACKEND) THEN
-         CALL dbcsr_distribution_new_prv(dist%dbcsr, template%dbcsr, group, pgrid, &
-                                         row_dist, col_dist, reuse_arrays)
+         IF (PRESENT(template)) THEN
+            CALL dbcsr_distribution_new_prv(dist%dbcsr, template%dbcsr, group, pgrid, &
+                                            row_dist, col_dist, reuse_arrays)
+         ELSE
+            CALL dbcsr_distribution_new_prv(dist%dbcsr, group=group, pgrid=pgrid, &
+                                            row_dist=row_dist, col_dist=col_dist, &
+                                            reuse_arrays=reuse_arrays)
+         END IF
       ELSE
          CPABORT("Not yet implemented for DBM.")
       END IF

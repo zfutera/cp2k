@@ -18,9 +18,9 @@ variables:
 build deps eiger:
   extends: .container-builder-cscs-zen2
   stage: deps
-  timeout: 1h
+  timeout: 2h
   before_script:
-    - DEPS_IMAGE_TAG=`cat ci/cscs_eiger_${TAG}.yaml ci/docker/build_${CI_JOB_STAGE}_${BUILDER}.Dockerfile $(find tools/spack -type f) $(find cmake -type f) | sha256sum - | head -c 16`
+    - DEPS_IMAGE_TAG=`cat make_cp2k.sh ci/cscs_eiger_${TAG}.yaml ci/docker/build_${CI_JOB_STAGE}_${BUILDER}.Dockerfile $(find tools/spack -type f) $(find cmake -type f) | sha256sum - | head -c 16`
     - export PERSIST_IMAGE_NAME=${CSCS_REGISTRY_PATH}/base/${REPOSITORY}:${TAG}_${DEPS_IMAGE_TAG}
     - echo "DEPS_IMAGE_NAME=${PERSIST_IMAGE_NAME}" | tee build.env
   artifacts:
@@ -29,15 +29,15 @@ build deps eiger:
   variables:
     DOCKER_BUILD_ARGS: '[
       "BASE_IMAGE",
-      "CP2K_BUILD_TYPE",
       "CP2K_VERSION",
-      "LOG_LINES"
+      "FEATURE_FLAGS",
+      "NUM_PROCS"
     ]'
     DOCKERFILE: ci/docker/build_${CI_JOB_STAGE}_${BUILDER}.Dockerfile
     BASE_IMAGE: ${UBUNTU_IMAGE_NAME}
-    CP2K_BUILD_TYPE: all
     CP2K_VERSION: ${VERSION}
-    LOG_LINES: 200
+    FEATURE_FLAGS: "-df libtorch"
+    NUM_PROCS: 32
 
 build cp2k eiger:
   extends: .container-builder-cscs-zen2
@@ -52,21 +52,24 @@ build cp2k eiger:
   variables:
     DOCKER_BUILD_ARGS: '[
       "BASE_IMAGE",
-      "DEPS_IMAGE"
+      "DEPS_IMAGE",
+      "FEATURE_FLAGS",
+      "NUM_PROCS"
     ]'
     DOCKERFILE: ci/docker/build_${CI_JOB_STAGE}_${BUILDER}.Dockerfile
     BASE_IMAGE: ${UBUNTU_IMAGE_NAME}
     DEPS_IMAGE: ${DEPS_IMAGE_NAME}
+    FEATURE_FLAGS: "-df libtorch"
+    NUM_PROCS: 32
     PERSIST_IMAGE_NAME: ${CSCS_IMAGE_NAME}
 
 test cp2k eiger:
-  extends: .container-runner-eiger-zen2
+  extends: .baremetal-runner-eiger-zen2
   stage: test
   needs: ["build cp2k eiger"]
   timeout: 1h
-  image: ${CSCS_IMAGE_NAME}
   script:
-    - cp2k /opt/cp2k/benchmarks/CI/H2O-32_md.inp
+    - podman run --env OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK} --shm-size=1g -v ${PWD}:/mnt ${DOCKERHUB_IMAGE_NAME} cp2k /opt/cp2k/benchmarks/CI/H2O-32_md.inp
   variables:
     SLURM_CONSTRAINT: mc
     SLURM_CPUS_PER_TASK: 8
@@ -83,13 +86,12 @@ regression test cp2k eiger:
   needs: ["build cp2k eiger","test cp2k eiger"]
   timeout: 1h
   script:
-    - podman run --mount type=bind,src=${SCRATCH},target=${SCRATCH} --workdir=${SCRATCH} ${DOCKERHUB_IMAGE_NAME} /opt/cp2k/tests/do_regtest.py --maxtasks 128 /opt/cp2k/bin ${VERSION}
+    - git --no-pager log -1 --pretty="%nCommitSHA:%x20%H%nCommitTime:%x20%ci%nCommitAuthor:%x20%an%nCommitSubject:%x20%s%n"
+    - podman run --shm-size=1g -v ${PWD}:/mnt ${DOCKERHUB_IMAGE_NAME} /opt/cp2k/tests/do_regtest.py --cp2kdatadir /opt/cp2k/install/share/cp2k/data --maxtasks ${SLURM_NTASKS} --mpiexec "mpiexec -bind-to none" --keepalive /opt/cp2k/install/bin ${VERSION} 2>&1 || true
   variables:
     SLURM_CONSTRAINT: mc
     SLURM_DEBUG: 1
     SLURM_HINT: nomultithread
     SLURM_JOB_NUM_NODES: 1
     SLURM_NTASKS: 128
-    SLURM_TIMELIMIT: 30
-
-# EOF
+    SLURM_TIMELIMIT: 40

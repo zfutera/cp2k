@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -1880,7 +1880,7 @@ CONTAINS
       !The SOC corrected KS eigenvalues
       ALLOCATE (tmp_shifts(ndo_mo, 2))
 
-      ialpha = 1; ibeta = 1; 
+      ialpha = 1; ibeta = 1;
       DO ido_mo = 1, ndo_so
          !need to find out whether the eigenvalue corresponds to an alpha or beta spin-orbtial
          alpha_tot_contrib = REAL(DOT_PRODUCT(evecs(1:ndo_mo, ido_mo), evecs(1:ndo_mo, ido_mo)))

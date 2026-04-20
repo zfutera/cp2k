@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -44,7 +44,8 @@ MODULE qs_dispersion_pairpot
    USE input_section_types,             ONLY: section_vals_get_subs_vals,&
                                               section_vals_type,&
                                               section_vals_val_get
-   USE kinds,                           ONLY: default_string_length,&
+   USE kinds,                           ONLY: default_path_length,&
+                                              default_string_length,&
                                               dp
    USE message_passing,                 ONLY: mp_para_env_type
    USE physcon,                         ONLY: bohr,&
@@ -104,7 +105,8 @@ CONTAINS
       CHARACTER(len=*), PARAMETER :: routineN = 'qs_dispersion_pairpot_init'
 
       CHARACTER(LEN=2)                                   :: symbol
-      CHARACTER(LEN=default_string_length)               :: aname, filename
+      CHARACTER(LEN=default_path_length)                 :: filename
+      CHARACTER(LEN=default_string_length)               :: aname
       CHARACTER(LEN=default_string_length), &
          DIMENSION(:), POINTER                           :: tmpstringlist
       INTEGER                                            :: elem, handle, i, ikind, j, max_elem, &
@@ -348,7 +350,9 @@ CONTAINS
             dispersion_env%alp = 14._dp
             !
             dispersion_env%cnfun = 3
-            dispersion_env%rc_cn = get_cn_radius(dispersion_env)
+            IF (dispersion_env%rc_cn < 0.0_dp) THEN
+               dispersion_env%rc_cn = get_cn_radius(dispersion_env)
+            END IF
             IF (PRESENT(pp_section)) THEN
                eeq_section => section_vals_get_subs_vals(pp_section, "EEQ")
                CALL read_eeq_param(eeq_section, dispersion_env%eeq_sparam)
@@ -398,7 +402,7 @@ CONTAINS
       ! make valgrind happy
       use_virial = .FALSE.
 
-      IF (dispersion_env%type .NE. xc_vdw_fun_pairpot) THEN
+      IF (dispersion_env%type /= xc_vdw_fun_pairpot) THEN
          RETURN
       END IF
 

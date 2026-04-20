@@ -6,8 +6,8 @@
 [ "${BASH_SOURCE[0]}" ] && SCRIPT_NAME="${BASH_SOURCE[0]}" || SCRIPT_NAME=$0
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_NAME")" && pwd -P)"
 
-openblas_ver="0.3.28" # Keep in sync with install_openblas.sh
-openblas_sha256="f1003466ad074e9b0c8d421a204121100b0751c96fc6fcf3d1456bd12f8a00a1"
+openblas_ver="0.3.32" # Keep in sync with install_openblas.sh
+openblas_sha256="f8a1138e01fddca9e4c29f9684fd570ba39dedc9ca76055e1425d5d4b1a4a766"
 openblas_pkg="OpenBLAS-${openblas_ver}.tar.gz"
 
 source "${SCRIPT_DIR}"/common_vars.sh
@@ -35,11 +35,7 @@ echo "==================== Getting proc arch info using OpenBLAS tools =========
 openblas_dir="$(find_openblas_dir)"
 # if cannot find openblas source dir, try download one
 if ! [ "$openblas_dir" ]; then
-  if [ -f ${openblas_pkg} ]; then
-    echo "${openblas_pkg} is found"
-  else
-    download_pkg_from_cp2k_org "${openblas_sha256}" "${openblas_pkg}"
-  fi
+  retrieve_package "${openblas_sha256}" "${openblas_pkg}"
   tar -xzf ${openblas_pkg}
   openblas_dir="$(find_openblas_dir)"
 fi

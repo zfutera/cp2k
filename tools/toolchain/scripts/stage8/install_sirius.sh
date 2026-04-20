@@ -6,8 +6,8 @@
 [ "${BASH_SOURCE[0]}" ] && SCRIPT_NAME="${BASH_SOURCE[0]}" || SCRIPT_NAME=$0
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_NAME")/.." && pwd -P)"
 
-sirius_ver="7.6.1"
-sirius_sha256="16a114dc17e28697750585820e69718a96e6929f88406d266c75cf9a7cdbdaaa"
+sirius_ver="7.7.1"
+sirius_sha256="6039c84197d9e719e826f98b840cff19bc513887b443f97c0099d3c8b908efed"
 
 source "${SCRIPT_DIR}"/common_vars.sh
 source "${SCRIPT_DIR}"/tool_kit.sh
@@ -23,9 +23,6 @@ fi
 
 [ -f "${BUILDDIR}/setup_sirius" ] && rm "${BUILDDIR}/setup_sirius"
 
-SIRIUS_CFLAGS=''
-SIRIUS_LDFLAGS=''
-SIRIUS_LIBS=''
 ! [ -d "${BUILDDIR}" ] && mkdir -p "${BUILDDIR}"
 cd "${BUILDDIR}"
 
@@ -104,25 +101,11 @@ case "$with_sirius" in
     if verify_checksums "${install_lock_file}"; then
       echo "sirius_dist-${sirius_ver} is already installed, skipping it."
     else
-      if [ -f SIRIUS-${sirius_ver}.tar.gz ]; then
-        echo "sirius_${sirius_ver}.tar.gz is found"
-      else
-        download_pkg_from_cp2k_org "${sirius_sha256}" "SIRIUS-${sirius_ver}.tar.gz"
-      fi
-
+      retrieve_package "${sirius_sha256}" "SIRIUS-${sirius_ver}.tar.gz"
       echo "Installing from scratch into ${pkg_install_dir}"
       [ -d sirius-${sirius_ver} ] && rm -rf sirius-${sirius_ver}
       tar -xzf SIRIUS-${sirius_ver}.tar.gz
       cd SIRIUS-${sirius_ver}
-
-      # GCC 13 stopped including some common headers.
-      # https://github.com/electronic-structure/SIRIUS/issues/854
-      sed -i'' -e '1s/.*/#include <cstdint>\n&/' src/*.hpp
-
-      # Patch SIRIUS 7.6.1 for Libxc 7.0.0
-      patch -p1 src/potential/xc_functional_base.hpp < ${SCRIPT_DIR}/stage8/sirius_libxc7.patch
-      # Patch SIRIUS 7.6.1 for pugixml (CMake)
-      patch -p1 cmake/sirius_cxxConfig.cmake.in < ${SCRIPT_DIR}/stage8/sirius_1050.patch
 
       rm -Rf build
       mkdir build
@@ -167,10 +150,10 @@ case "$with_sirius" in
         -DSIRIUS_USE_MEMORY_POOL=OFF \
         -DSIRIUS_USE_ELPA=OFF \
         ${EXTRA_CMAKE_FLAGS} .. \
-        > cmake.log 2>&1 || tail -n ${LOG_LINES} cmake.log
+        > cmake.log 2>&1 || tail_excerpt cmake.log
 
-      make -j $(get_nprocs) -C src >> make.log 2>&1 || tail -n ${LOG_LINES} make.log
-      make install >> make.log 2>&1 || tail -n ${LOG_LINES} make.log
+      make -j $(get_nprocs) -C src >> make.log 2>&1 || tail_excerpt make.log
+      make install >> make.log 2>&1 || tail_excerpt make.log
       cd ..
 
       # now do we have cuda as well
@@ -196,9 +179,9 @@ case "$with_sirius" in
           -DCMAKE_C_COMPILER="${MPICC}" \
           -DCMAKE_Fortran_COMPILER="${MPIFC}" \
           ${EXTRA_CMAKE_FLAGS} .. \
-          >> cmake.log 2>&1 || tail -n ${LOG_LINES} cmake.log
-        make -j $(get_nprocs) -C src >> make.log 2>&1 || tail -n ${LOG_LINES} make.log
-        make install >> make.log 2>&1 || tail -n ${LOG_LINES} make.log
+          >> cmake.log 2>&1 || tail_excerpt cmake.log
+        make -j $(get_nprocs) -C src >> make.log 2>&1 || tail_excerpt make.log
+        make install >> make.log 2>&1 || tail_excerpt make.log
         SIRIUS_CUDA_LDFLAGS="-L'${pkg_install_dir}/cuda/lib' -Wl,-rpath,'${pkg_install_dir}/cuda/lib'"
         cd ..
       fi
@@ -280,7 +263,6 @@ prepend_path CPATH "${pkg_install_dir}/include/sirius"
 prepend_path PKG_CONFIG_PATH "${pkg_install_dir}/lib/pkgconfig"
 prepend_path CMAKE_PREFIX_PATH "${pkg_install_dir}"
 EOF
-    cat "${BUILDDIR}/setup_sirius" >> $SETUPFILE
   fi
   cat << EOF >> "${BUILDDIR}/setup_sirius"
 export SIRIUS_CFLAGS="IF_CUDA(-I${pkg_install_dir}/cuda/include/sirius|-I${pkg_install_dir}/include/sirius)"
@@ -293,6 +275,7 @@ export CP_CFLAGS="\${CP_CFLAGS} IF_MPI("\${SIRIUS_CFLAGS}"|)"
 export CP_LDFLAGS="\${CP_LDFLAGS} IF_MPI(IF_CUDA("\${SIRIUS_CUDA_LDFLAGS}"|"\${SIRIUS_LDFLAGS}")|)"
 export CP_LIBS="IF_MPI("\${SIRIUS_LIBS}"|) \${CP_LIBS}"
 EOF
+  filter_setup "${BUILDDIR}/setup_sirius" "${SETUPFILE}"
   cat << EOF >> ${INSTALLDIR}/lsan.supp
 # leaks related to SIRIUS
 leak:cublasXtDeviceSelect

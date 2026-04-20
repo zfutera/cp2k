@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -208,9 +208,9 @@ CONTAINS
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'srb_potential'
       REAL(KIND=dp), DIMENSION(5:9), PARAMETER :: &
-         cnfac = (/0.05646607_dp, 0.10514203_dp, 0.09753494_dp, 0.30470380_dp, 0.23261783_dp/), &
-         ensrb = (/2.20568300_dp, 2.49640820_dp, 2.81007174_dp, 4.51078438_dp, 4.67476223_dp/), &
-         r0srb = (/1.35974851_dp, 0.98310699_dp, 0.98423007_dp, 0.76716063_dp, 1.06139799_dp/)
+         cnfac = [0.05646607_dp, 0.10514203_dp, 0.09753494_dp, 0.30470380_dp, 0.23261783_dp], &
+         ensrb = [2.20568300_dp, 2.49640820_dp, 2.81007174_dp, 4.51078438_dp, 4.67476223_dp], &
+         r0srb = [1.35974851_dp, 0.98310699_dp, 0.98423007_dp, 0.76716063_dp, 1.06139799_dp]
 
       INTEGER                                            :: atom_a, atom_b, atom_c, handle, i, &
                                                             iatom, ikind, jatom, jkind, katom, &

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -59,6 +59,7 @@ MODULE qs_tddfpt2_subgroups
    USE pw_env_types,                    ONLY: pw_env_release,&
                                               pw_env_retain,&
                                               pw_env_type
+   USE pw_types,                        ONLY: pw_r3d_rs_type
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
    USE qs_kind_types,                   ONLY: get_qs_kind,&
@@ -113,9 +114,10 @@ MODULE qs_tddfpt2_subgroups
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env => NULL()
       !> group-specific MPI parallel environment
       TYPE(mp_para_env_type), POINTER                    :: para_env => NULL()
-      !> occupied MOs stored in a matrix form [nao x nmo_occ(spin)] distributed across processes
+      !> (active) occupied MOs stored in a matrix form [nao x nmo_occ(spin)] distributed across processes
       !> in the parallel group
-      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)      :: mos_occ
+      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: mos_occ
+      TYPE(cp_fm_type), ALLOCATABLE, DIMENSION(:)        :: mos_active
       !> group-specific copy of the ADMM A matrix 'admm_type%A'
       TYPE(cp_fm_type), POINTER                          :: admm_A => NULL()
       !
@@ -128,6 +130,8 @@ MODULE qs_tddfpt2_subgroups
       TYPE(distribution_2d_type), POINTER                :: dist_2d => NULL()
       !> group-specific plane wave environment
       TYPE(pw_env_type), POINTER                         :: pw_env => NULL()
+      !> integration weights
+      TYPE(pw_r3d_rs_type), POINTER                      :: xcint_weights => Null()
       !> lists of neighbours in auxiliary and primary basis sets
       TYPE(neighbor_list_set_p_type), &
          DIMENSION(:), POINTER                           :: sab_aux_fit => NULL(), sab_orb => NULL()
@@ -171,21 +175,22 @@ CONTAINS
 !> \param sub_env  parallel group environment (initialised on exit)
 !> \param qs_env   Quickstep environment
 !> \param mos_occ  ground state molecular orbitals in primary atomic basis set
+!> \param mos_active  active ground state molecular orbitals in primary atomic basis set
 !> \param kernel   Type of kernel (full/sTDA) that will be used
 !> \par History
 !>    * 01.2017 (sub)group-related code has been moved here from the main subroutine tddfpt()
 !>              [Sergey Chulkov]
 ! **************************************************************************************************
-   SUBROUTINE tddfpt_sub_env_init(sub_env, qs_env, mos_occ, kernel)
+   SUBROUTINE tddfpt_sub_env_init(sub_env, qs_env, mos_occ, mos_active, kernel)
       TYPE(tddfpt_subgroup_env_type), INTENT(out)        :: sub_env
       TYPE(qs_environment_type), POINTER                 :: qs_env
-      TYPE(cp_fm_type), DIMENSION(:), INTENT(in)         :: mos_occ
+      TYPE(cp_fm_type), DIMENSION(:), INTENT(in)         :: mos_occ, mos_active
       INTEGER, INTENT(in)                                :: kernel
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'tddfpt_sub_env_init'
 
       INTEGER                                            :: handle, ispin, nao, nao_aux, natom, &
-                                                            nmo_occ, nspins
+                                                            nmo_active, nmo_occ, nspins
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env_global
@@ -194,6 +199,7 @@ CONTAINS
       TYPE(mgrid_saved_parameters)                       :: mgrid_saved
       TYPE(mp_para_env_type), POINTER                    :: para_env_global
       TYPE(pw_env_type), POINTER                         :: pw_env_global
+      TYPE(pw_r3d_rs_type), POINTER                      :: weights
       TYPE(qs_control_type), POINTER                     :: qs_control
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(tddfpt2_control_type), POINTER                :: tddfpt_control
@@ -215,7 +221,14 @@ CONTAINS
       sub_env%is_split = tddfpt_control%nprocs > 0 .AND. tddfpt_control%nprocs*2 <= para_env_global%num_pe
 
       ALLOCATE (sub_env%mos_occ(nspins))
+      ALLOCATE (sub_env%mos_active(nspins))
       NULLIFY (sub_env%admm_A)
+
+      CALL get_qs_env(qs_env, xcint_weights=weights)
+      sub_env%xcint_weights => weights
+      IF (sub_env%is_split .AND. ASSOCIATED(weights)) THEN
+         CPABORT('subgroups and integration weights not compatible')
+      END IF
 
       IF (sub_env%is_split) THEN
          ALLOCATE (sub_env%group_distribution(0:para_env_global%num_pe - 1))
@@ -245,6 +258,15 @@ CONTAINS
                                                       fm_dest_sub=sub_env%mos_occ(ispin), sub_env=sub_env)
          END DO
 
+         DO ispin = 1, nspins
+            CALL cp_fm_get_info(mos_active(ispin), nrow_global=nao, ncol_global=nmo_active)
+            CALL cp_fm_struct_create(fm_struct, nrow_global=nao, ncol_global=nmo_active, context=sub_env%blacs_env)
+            CALL cp_fm_create(sub_env%mos_active(ispin), fm_struct)
+            CALL cp_fm_struct_release(fm_struct)
+            CALL tddfpt_fm_replicate_across_subgroups(fm_src=mos_active(ispin), &
+                                                      fm_dest_sub=sub_env%mos_active(ispin), sub_env=sub_env)
+         END DO
+
          IF (dft_control%do_admm) THEN
             CALL get_qs_env(qs_env, admm_env=admm_env)
             CALL cp_fm_get_info(admm_env%A, nrow_global=nao_aux, ncol_global=nao)
@@ -262,6 +284,7 @@ CONTAINS
          sub_env%blacs_env => blacs_env_global
 
          sub_env%mos_occ(:) = mos_occ(:)
+         sub_env%mos_active(:) = mos_active(:)
 
          IF (dft_control%do_admm) THEN
             CALL get_qs_env(qs_env, admm_env=admm_env)
@@ -281,6 +304,10 @@ CONTAINS
          IF (sub_env%is_mgrid) THEN
             IF (tddfpt_control%mgrid_is_explicit) &
                CALL init_tddfpt_mgrid(qs_control, tddfpt_control, mgrid_saved)
+
+            IF (ASSOCIATED(weights)) THEN
+               CPABORT('Redefining MGRID and integration weights not compatible')
+            END IF
 
             NULLIFY (sub_env%pw_env)
 
@@ -475,8 +502,12 @@ CONTAINS
          DO i = SIZE(sub_env%mos_occ), 1, -1
             CALL cp_fm_release(sub_env%mos_occ(i))
          END DO
+         DO i = SIZE(sub_env%mos_active), 1, -1
+            CALL cp_fm_release(sub_env%mos_active(i))
+         END DO
       END IF
       DEALLOCATE (sub_env%mos_occ)
+      DEALLOCATE (sub_env%mos_active)
 
       CALL cp_blacs_env_release(sub_env%blacs_env)
       CALL mp_para_env_release(sub_env%para_env)
@@ -725,8 +756,8 @@ CONTAINS
       END IF
 
       CALL allocate_task_list(task_list)
-      CALL generate_qs_task_list(ks_env, task_list, &
-                                 reorder_rs_grid_ranks=reorder_grid_ranks, basis_type=basis_type, &
+      CALL generate_qs_task_list(ks_env, task_list, basis_type=basis_type, &
+                                 reorder_rs_grid_ranks=reorder_grid_ranks, &
                                  skip_load_balance_distributed=skip_load_balance, &
                                  pw_env_external=pw_env, sab_orb_external=sab)
 

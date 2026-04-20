@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -796,7 +796,7 @@ CONTAINS
       CHARACTER(LEN=default_string_length), OPTIONAL     :: file_position
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'qs_print_cubes'
-      CHARACTER, DIMENSION(3), PARAMETER                 :: labels = (/'x', 'y', 'z'/)
+      CHARACTER, DIMENSION(3), PARAMETER                 :: labels = ['x', 'y', 'z']
 
       CHARACTER                                          :: label
       CHARACTER(LEN=default_path_length)                 :: file_tmp, filename, my_pos
@@ -1005,9 +1005,9 @@ CONTAINS
             ! Note (TL) : even the new DCD format is unfortunately too poor
             !             for our capabilities.. for example here the printing
             !             of the geometry could be nested inside several iteration
-            !             levels.. this cannot be exactly reproduce with DCD.
+            !             levels.. this cannot be exactly reproduced with DCD.
             !             Just as a compromise let's pick-up the value of the MD iteration
-            !             level. In any case this is not any sensible information for the standard..
+            !             level. In any case this is not any sensible information for the standard.
             iskip = section_get_ival(print_key, "EACH%MD")
             WRITE (iunit) "CORD", 0, -1, iskip, &
                0, 0, 0, 0, 0, 0, REAL(0, KIND=sp), 1, 0, 0, 0, 0, 0, 0, 0, 0, 24

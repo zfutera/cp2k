@@ -6,7 +6,7 @@ from asyncio import Semaphore, Task
 from asyncio.subprocess import DEVNULL, PIPE, STDOUT, Process
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Coroutine, Dict, List, Literal, Optional, TextIO, Tuple, Union
+from typing import Any, Coroutine, Dict, List, Optional, TextIO, Tuple, Union
 from statistics import mean, stdev
 import argparse
 import asyncio
@@ -18,6 +18,11 @@ import subprocess
 import sys
 import time
 from matchers import run_matcher
+
+if sys.version_info >= (3, 8):
+    from typing import Literal
+else:
+    from typing_extensions import Literal
 
 # Try importing toml from various places.
 try:
@@ -74,7 +79,8 @@ async def main() -> None:
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--restrictdir", action="append")
     parser.add_argument("--skipdir", action="append")
-    parser.add_argument("--workbasedir", type=Path)
+    parser.add_argument("--workbasedir", type=Path, default=Path.cwd() / "regtesting")
+    parser.add_argument("--cp2kdatadir", type=Path)
     parser.add_argument("--skip_unittests", action="store_true")
     parser.add_argument("--skip_regtests", action="store_true")
     parser.add_argument("binary_dir", type=Path)
@@ -108,11 +114,15 @@ async def main() -> None:
     print(f"Flag slow:      {cfg.flag_slow}")
     print(f"Debug:          {cfg.debug}")
     print(f"Binary dir:     {cfg.binary_dir}")
+    print(f"CP2K data dir:  {cfg.cp2k_data_dir}")
     print(f"VERSION:        {cfg.version}")
     print(f"Flags:          " + ",".join(flags))
 
     # Have to copy everything upfront because the test dirs are not self-contained.
     print("------------------------------------------------------------------------")
+    if is_relative_to(cfg.work_base_dir, cfg.cp2k_root / "tests"):
+        print(f"Error: Work base dir must not be relative to cp2k/tests dir.")
+        sys.exit(1)
     print("Copying test files ...", end="")
     shutil.copytree(cfg.cp2k_root / "tests", cfg.work_base_dir)
     print(" done")
@@ -145,6 +155,13 @@ async def main() -> None:
             if cfg.smoketest:
                 break  # run only one test per directory
         batches.append(batch)
+
+    # Check for nested test dirs.
+    for batch_a in batches:
+        for batch_b in batches:
+            if batch_a != batch_b and is_relative_to(batch_a.workdir, batch_b.workdir):
+                print(f"Error: Test dirs {batch_a.name} and {batch_b.name} are nested.")
+                sys.exit(1)
 
     # Create async tasks.
     tasks: List[Task[BatchResult]] = []
@@ -213,7 +230,7 @@ async def main() -> None:
         for t in await asyncio.gather(*rerun_tasks):
             rerun_times.update({r.fullname: r.duration for r in t.results})
         stats = {r.fullname: [r.duration, rerun_times[r.fullname]] for r in maybe_slow}
-        slow_tests = {k: v for k, v in stats.items() if mean(v) > threshold}
+        slow_tests = {k: v for k, v in stats.items() if mean(v) - stdev(v) > threshold}
         print(f"Duration threshold (2x 95th %ile): {threshold:.2f} sec")
         print(f"Found {len(slow_tests)} slow tests ({num_suppressed} suppressed):")
         for k, v in slow_tests.items():
@@ -246,6 +263,21 @@ async def main() -> None:
 
 
 # ======================================================================================
+def _is_intel_mpi(mpiexec_cmd: str = "mpiexec") -> bool:
+    """Check if the given mpiexec command belongs to Intel MPI."""
+    try:
+        result = subprocess.run(
+            [mpiexec_cmd, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return "Intel" in result.stdout or "Intel" in result.stderr
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+
+
+# ======================================================================================
 class Config:
     def __init__(self, args: argparse.Namespace):
         self.timeout = args.timeout
@@ -259,6 +291,9 @@ class Config:
         self.mpiexec = args.mpiexec
         if "{N}" not in self.mpiexec:  # backwards compatibility
             self.mpiexec = f"{self.mpiexec} ".replace(" ", " -n {N} ", 1).strip()
+        self.intel_mpi = _is_intel_mpi(self.mpiexec.split()[0])
+        if self.intel_mpi and "--bind-to" in self.mpiexec:
+            self.mpiexec = self.mpiexec.replace(" --bind-to none", "")
         self.smoketest = args.smoketest
         self.valgrind = args.valgrind
         self.keepalive = args.keepalive
@@ -272,9 +307,12 @@ class Config:
         self.skip_unittests = args.skip_unittests
         self.skip_regtests = args.skip_regtests
         datestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        leaf_dir = f"TEST-{datestamp}"
-        self.work_base_dir = (args.workbasedir or args.binary_dir).resolve() / leaf_dir
+        self.work_base_dir = args.workbasedir.resolve() / f"TEST-{datestamp}"
         self.error_summary = self.work_base_dir / "error_summary"
+        self.cp2k_data_dir = (
+            args.cp2kdatadir
+            or Path(os.getenv("CP2K_DATA_DIR", str(self.cp2k_root / "data")))
+        ).resolve()
 
         # Parse suppression files.
         slow_supps_fn = self.cp2k_root / "tests" / "SLOW_TESTS_SUPPRESSIONS"
@@ -309,9 +347,16 @@ class Config:
             env["CUDA_VISIBLE_DEVICES"] = ",".join(visible_gpu_devices)
             env["HIP_VISIBLE_DEVICES"] = ",".join(visible_gpu_devices)
         env["OMP_NUM_THREADS"] = str(self.ompthreads)
+        if self.intel_mpi:
+            env["I_MPI_PIN"] = "0"
+        env["CP2K_DATA_DIR"] = str(self.cp2k_data_dir)
         env["PIKA_COMMANDLINE_OPTIONS"] = (
             f"--pika:bind=none --pika:threads={self.ompthreads}"
         )
+        if cwd is not None and "MIMIC" == cwd.parent.name:
+            env["MCL_COMM_MODE"] = "TEST_STUB"
+            env["MCL_PROGRAM"] = "1"
+            env["MCL_TEST_DATA"] = "MCL_LOG_1"
         exe_name = f"{exe_stem}.{self.version}"
         cmd = [str(self.binary_dir / exe_name)]
         if self.valgrind:
@@ -643,6 +688,11 @@ def percentile(values: List[float], percent: float) -> float:
     d0 = values[int(f)] * (c - k)
     d1 = values[int(c)] * (k - f)
     return d0 + d1
+
+
+# ======================================================================================
+def is_relative_to(p: Path, u: Path) -> bool:  # not in pathlib before Python 3.9
+    return u == p or u in p.parents
 
 
 # ======================================================================================

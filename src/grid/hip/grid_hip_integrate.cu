@@ -1,12 +1,12 @@
 /*----------------------------------------------------------------------------*/
 /*  CP2K: A general program to perform molecular dynamics simulations         */
-/*  Copyright 2000-2025 CP2K developers group <https://cp2k.org>              */
+/*  Copyright 2000-2026 CP2K developers group <https://cp2k.org>              */
 /*                                                                            */
 /*  SPDX-License-Identifier: BSD-3-Clause                                     */
 /*----------------------------------------------------------------------------*/
 
 /*
- * inspirartions from the gpu backend
+ * inspirations from the gpu backend
  * Authors :
  - Dr Mathieu Taillefumier (ETH Zurich / CSCS)
  - Advanced Micro Devices, Inc.

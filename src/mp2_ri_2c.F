@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -78,6 +78,9 @@ MODULE mp2_ri_2c
    USE libint_2c_3c,                    ONLY: compare_potential_types,&
                                               libint_potential_type
    USE machine,                         ONLY: m_flush
+   USE mathconstants,                   ONLY: gaussi,&
+                                              z_one,&
+                                              z_zero
    USE message_passing,                 ONLY: mp_comm_type,&
                                               mp_para_env_release,&
                                               mp_para_env_type,&
@@ -452,8 +455,8 @@ CONTAINS
       nkp = kpoints%nkp
 
       ALLOCATE (fm_matrix_L_kpoints(nkp, 2))
-      DO ikp = 1, nkp
-         DO i_real_imag = 1, 2
+      DO i_real_imag = 1, 2
+         DO ikp = 1, nkp
             CALL cp_fm_create(fm_matrix_L_kpoints(ikp, i_real_imag), &
                               fm_matrix_Minv_L_kpoints(1, i_real_imag)%matrix_struct)
             CALL cp_fm_set_all(fm_matrix_L_kpoints(ikp, i_real_imag), 0.0_dp)
@@ -649,7 +652,7 @@ CONTAINS
       IF (do_kpoints) THEN
          CPASSERT(PRESENT(kpoints))
          IF (my_do_build_cell_index) THEN
-            CALL kpoint_init_cell_index(kpoints, sab_RI, para_env, dft_control)
+            CALL kpoint_init_cell_index(kpoints, sab_RI, para_env, dft_control%nimages)
          END IF
          CALL get_kpoint_info(kpoints, nkp=nkp, xkp=xkp, &
                               cell_to_index=cell_to_index)
@@ -695,8 +698,8 @@ CONTAINS
       IF (PRESENT(ikp_ext)) nkp = 1
 
       ALLOCATE (fm_matrix_Minv_L_kpoints(nkp, n_real_imag))
-      DO i_size = 1, nkp
-         DO i_real_imag = 1, n_real_imag
+      DO i_real_imag = 1, n_real_imag
+         DO i_size = 1, nkp
             CALL cp_fm_create(fm_matrix_Minv_L_kpoints(i_size, i_real_imag), fm_matrix_L%matrix_struct)
             CALL cp_fm_set_all(fm_matrix_Minv_L_kpoints(i_size, i_real_imag), 0.0_dp)
          END DO
@@ -904,16 +907,16 @@ CONTAINS
 
       potential_type = potential%potential_type
 
-      IF ((eri_method .EQ. do_eri_mme .OR. eri_method .EQ. do_eri_os) &
-          .AND. potential_type .EQ. do_potential_coulomb .OR. &
-          (eri_method .EQ. do_eri_mme .AND. potential_type .EQ. do_potential_long)) THEN
+      IF ((eri_method == do_eri_mme .OR. eri_method == do_eri_os) &
+          .AND. potential_type == do_potential_coulomb .OR. &
+          (eri_method == do_eri_mme .AND. potential_type == do_potential_long)) THEN
 
          CALL mp2_eri_2c_integrate(eri_param, potential, para_env_sub, qs_env, &
                                    basis_type_a="RI_AUX", basis_type_b="RI_AUX", &
                                    hab=L_local_col, first_b=my_group_L_start, last_b=my_group_L_end, &
                                    eri_method=eri_method)
 
-      ELSEIF (eri_method .EQ. do_eri_gpw .OR. &
+      ELSEIF (eri_method == do_eri_gpw .OR. &
               (potential_type == do_potential_long .AND. qs_env%mp2_env%eri_method == do_eri_os) &
               .OR. (potential_type == do_potential_id .AND. qs_env%mp2_env%eri_method == do_eri_mme)) THEN
 
@@ -1224,8 +1227,8 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'fill_fm_L_from_L_loc_non_blocking'
 
-      INTEGER :: dummy_proc, handle, handle2, i_entry_rec, i_row, i_row_global, iproc, j_col, &
-         j_col_global, LLL, MMM, ncol_local, nrow_local, proc_send, send_pcol, send_prow
+      INTEGER :: dummy_proc, handle, handle2, i_entry_rec, i_row, iproc, j_col, LLL, MMM, &
+         ncol_local, nrow_local, proc_send, send_pcol, send_prow
       INTEGER, ALLOCATABLE, DIMENSION(:)                 :: entry_counter, num_entries_rec, &
                                                             num_entries_send
       INTEGER, DIMENSION(:), POINTER                     :: col_indices, row_indices
@@ -1333,13 +1336,13 @@ CONTAINS
 
       ! get the process, where the elements from L_local_col have to be sent and
       ! write the data and the info to buffer_send
-      DO LLL = 1, dimen_RI
+      DO MMM = my_group_L_start, my_group_L_end
 
-         send_prow = fm_matrix_L%matrix_struct%g2p_row(LLL)
+         send_pcol = fm_matrix_L%matrix_struct%g2p_col(MMM)
 
-         DO MMM = my_group_L_start, my_group_L_end
+         DO LLL = 1, dimen_RI
 
-            send_pcol = fm_matrix_L%matrix_struct%g2p_col(MMM)
+            send_prow = fm_matrix_L%matrix_struct%g2p_row(LLL)
 
             proc_send = fm_matrix_L%matrix_struct%context%blacs2mpi(send_prow, send_pcol)
 
@@ -1373,30 +1376,17 @@ CONTAINS
 
       ! fill fm_matrix_L with the entries from buffer_rec
       DO iproc = 0, para_env%num_pe - 1
-
          DO i_entry_rec = 1, num_entries_rec(iproc)
-
-            DO i_row = 1, nrow_local
-
-               i_row_global = row_indices(i_row)
-
-               DO j_col = 1, ncol_local
-
-                  j_col_global = col_indices(j_col)
-
-                  IF (i_row_global == buffer_rec(iproc)%indx(i_entry_rec, 1) .AND. &
-                      j_col_global == buffer_rec(iproc)%indx(i_entry_rec, 2)) THEN
-
-                     fm_matrix_L%local_data(i_row, j_col) = buffer_rec(iproc)%msg(i_entry_rec)
-
-                  END IF
-
-               END DO
-
+            DO j_col = 1, ncol_local
+               IF (col_indices(j_col) == buffer_rec(iproc)%indx(i_entry_rec, 2)) THEN
+                  DO i_row = 1, nrow_local
+                     IF (row_indices(i_row) == buffer_rec(iproc)%indx(i_entry_rec, 1)) THEN
+                        fm_matrix_L%local_data(i_row, j_col) = buffer_rec(iproc)%msg(i_entry_rec)
+                     END IF
+                  END DO
+               END IF
             END DO
-
          END DO
-
       END DO
 
       CALL timestop(handle2)
@@ -1452,10 +1442,10 @@ CONTAINS
                              ncol_local=ncol_local, &
                              row_indices=row_indices, &
                              col_indices=col_indices)
-         DO iiB = 1, nrow_local
-            i_global = row_indices(iiB)
-            DO jjB = 1, ncol_local
-               j_global = col_indices(jjB)
+         DO jjB = 1, ncol_local
+            j_global = col_indices(jjB)
+            DO iiB = 1, nrow_local
+               i_global = row_indices(iiB)
                IF (j_global < i_global) fm_matrix_L%local_data(iiB, jjB) = 0.0_dp
             END DO
          END DO
@@ -1484,8 +1474,6 @@ CONTAINS
       REAL(KIND=dp), INTENT(IN)                          :: eps_eigval_S
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'inversion_of_M_and_mult_with_chol_dec_of_V'
-      COMPLEX(KIND=dp), PARAMETER :: cone = CMPLX(1.0_dp, 0.0_dp, KIND=dp), &
-         czero = CMPLX(0.0_dp, 0.0_dp, KIND=dp), ione = CMPLX(0.0_dp, 1.0_dp, KIND=dp)
 
       INTEGER                                            :: handle, ikp, nkp
       TYPE(cp_cfm_type)                                  :: cfm_matrix_K_tmp, cfm_matrix_M_tmp, &
@@ -1505,11 +1493,11 @@ CONTAINS
 
       DO ikp = 1, nkp
 
-         CALL cp_cfm_scale_and_add_fm(czero, cfm_matrix_M_tmp, cone, fm_matrix_Minv_L_kpoints(ikp, 1))
-         CALL cp_cfm_scale_and_add_fm(cone, cfm_matrix_M_tmp, ione, fm_matrix_Minv_L_kpoints(ikp, 2))
+         CALL cp_cfm_scale_and_add_fm(z_zero, cfm_matrix_M_tmp, z_one, fm_matrix_Minv_L_kpoints(ikp, 1))
+         CALL cp_cfm_scale_and_add_fm(z_one, cfm_matrix_M_tmp, gaussi, fm_matrix_Minv_L_kpoints(ikp, 2))
 
-         CALL cp_cfm_scale_and_add_fm(czero, cfm_matrix_V_tmp, cone, fm_matrix_L_kpoints(ikp, 1))
-         CALL cp_cfm_scale_and_add_fm(cone, cfm_matrix_V_tmp, ione, fm_matrix_L_kpoints(ikp, 2))
+         CALL cp_cfm_scale_and_add_fm(z_zero, cfm_matrix_V_tmp, z_one, fm_matrix_L_kpoints(ikp, 1))
+         CALL cp_cfm_scale_and_add_fm(z_one, cfm_matrix_V_tmp, gaussi, fm_matrix_L_kpoints(ikp, 2))
 
          CALL cp_cfm_power(cfm_matrix_M_tmp, threshold=eps_eigval_S, exponent=-1.0_dp)
 
@@ -1519,8 +1507,8 @@ CONTAINS
          CALL cp_cfm_to_fm(cfm_matrix_V_tmp, fm_matrix_L_kpoints(ikp, 1), fm_matrix_L_kpoints(ikp, 2))
 
          ! get K = M^(-1)*L, where L is the Cholesky decomposition of V = L^T*L
-         CALL parallel_gemm("N", "C", dimen_RI, dimen_RI, dimen_RI, cone, cfm_matrix_M_tmp, cfm_matrix_V_tmp, &
-                            czero, cfm_matrix_K_tmp)
+         CALL parallel_gemm("N", "C", dimen_RI, dimen_RI, dimen_RI, z_one, cfm_matrix_M_tmp, cfm_matrix_V_tmp, &
+                            z_zero, cfm_matrix_K_tmp)
 
          ! move
          CALL cp_cfm_to_fm(cfm_matrix_K_tmp, fm_matrix_Minv_L_kpoints(ikp, 1), fm_matrix_Minv_L_kpoints(ikp, 2))

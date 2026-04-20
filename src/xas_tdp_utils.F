@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -533,9 +533,9 @@ CONTAINS
                ot_elb = xas_tdp_env%lumo_evals(1)%array(1)
                IF (do_os) ot_elb = MIN(ot_elb, xas_tdp_env%lumo_evals(2)%array(1))
 
-               ot_nevals = COUNT(xas_tdp_env%lumo_evals(1)%array - ot_elb .LE. xas_tdp_control%e_range)
+               ot_nevals = COUNT(xas_tdp_env%lumo_evals(1)%array - ot_elb <= xas_tdp_control%e_range)
                IF (do_os) ot_nevals = ot_nevals + &
-                                      COUNT(xas_tdp_env%lumo_evals(2)%array - ot_elb .LE. xas_tdp_control%e_range)
+                                      COUNT(xas_tdp_env%lumo_evals(2)%array - ot_elb <= xas_tdp_control%e_range)
 
             ELSE
 
@@ -633,7 +633,7 @@ CONTAINS
          CALL dbcsr_multiply('N', 'N', 1.0_dp, donor_state%metric(2)%matrix, tmp_mat2, &
                              0.0_dp, tmp_mat, filter_eps=xas_tdp_control%eps_filter)
          CALL cp_dbcsr_sm_fm_multiply(tmp_mat, c_diff, c_sum, ncol=nrow)
-         WHERE (tmp_evals .NE. 0) scaling = -1.0_dp/tmp_evals
+         WHERE (tmp_evals /= 0) scaling = -1.0_dp/tmp_evals
          CALL cp_fm_column_scale(c_sum, scaling)
 
 !        Full TDDFT specific clean-up
@@ -670,6 +670,7 @@ CONTAINS
 
       END IF
 
+      xas_tdp_env%nstates = nevals
       ALLOCATE (lr_evals(nevals))
       lr_evals(:) = tmp_evals(first_ex:first_ex + nevals - 1)
 
@@ -1588,8 +1589,8 @@ CONTAINS
 ! Creating the real and the imaginary part of the SOC perturbation matrix
       CALL cp_fm_struct_create(full_struct, context=blacs_env, para_env=para_env, &
                                nrow_global=ntot, ncol_global=ntot)
-      CALL cp_fm_create(real_fm, full_struct)
-      CALL cp_fm_create(img_fm, full_struct)
+      CALL cp_fm_create(real_fm, full_struct, set_zero=.TRUE.)
+      CALL cp_fm_create(img_fm, full_struct, set_zero=.TRUE.)
 
 ! Put the excitation energies on the diagonal of the real  matrix. Element 1,1 is the ground state
       DO isc = 1, nsc
@@ -1721,7 +1722,7 @@ CONTAINS
       ! some more useful work matrices
       CALL cp_fm_struct_create(work_struct, context=blacs_env, para_env=para_env, &
                                nrow_global=nex, ncol_global=nex)
-      CALL cp_fm_create(work_fm, work_struct)
+      CALL cp_fm_create(work_fm, work_struct, set_zero=.TRUE.)
 
 !  Looping over the excited states, computing the SOC and filling the perturbation matrix
 !  There are 3 loops to do: sc-sc, sc-sf and sf-sf
@@ -2006,8 +2007,8 @@ CONTAINS
       CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
       CALL cp_fm_struct_create(full_struct, context=blacs_env, para_env=para_env, &
                                nrow_global=ntot, ncol_global=ntot)
-      CALL cp_fm_create(real_fm, full_struct)
-      CALL cp_fm_create(img_fm, full_struct)
+      CALL cp_fm_create(real_fm, full_struct, set_zero=.TRUE.)
+      CALL cp_fm_create(img_fm, full_struct, set_zero=.TRUE.)
 
 !  Put the excitation energies on the diagonal of the real matrix
       DO isg = 1, nsg
@@ -2405,7 +2406,7 @@ CONTAINS
                                nrow_global=ntot, ncol_global=ntot)
       ALLOCATE (amew_op(dim_op))
       DO i = 1, dim_op
-         CALL cp_fm_create(amew_op(i), full_struct)
+         CALL cp_fm_create(amew_op(i), full_struct, set_zero=.TRUE.)
       END DO
 
 !  Before looping, need to evaluate sum_j,sigma <phi^0_j,sgima|op|phi^0_j,sigma>, for each dimension
@@ -2418,8 +2419,8 @@ CONTAINS
       CALL cp_fm_get_info(mo_coeff, matrix_struct=vec_struct)
       CALL cp_fm_struct_create(prod_struct, context=blacs_env, para_env=para_env, &
                                nrow_global=homo, ncol_global=homo)
-      CALL cp_fm_create(vec_work, vec_struct)
-      CALL cp_fm_create(prod_work, prod_struct)
+      CALL cp_fm_create(vec_work, vec_struct, set_zero=.TRUE.)
+      CALL cp_fm_create(prod_work, prod_struct, set_zero=.TRUE.)
 
       DO i = 1, dim_op
 
@@ -2636,7 +2637,7 @@ CONTAINS
                                nrow_global=ntot, ncol_global=ntot)
       ALLOCATE (amew_op(dim_op))
       DO i = 1, dim_op
-         CALL cp_fm_create(amew_op(i), full_struct)
+         CALL cp_fm_create(amew_op(i), full_struct, set_zero=.TRUE.)
       END DO !i
 
 !  Deal with the GS-GS contribution <0|0> = 2*sum_j <phi_j|op|phi_j>
@@ -2993,9 +2994,9 @@ CONTAINS
       CALL cp_fm_struct_create(dip_struct, context=blacs_env, para_env=para_env, &
                                nrow_global=ntot, ncol_global=1)
       CALL cp_cfm_get_info(soc_evecs_cfm, matrix_struct=full_struct)
-      CALL cp_cfm_create(dip_cfm, dip_struct)
-      CALL cp_cfm_create(work1_cfm, full_struct)
-      CALL cp_cfm_create(work2_cfm, full_struct)
+      CALL cp_cfm_create(dip_cfm, dip_struct, set_zero=.TRUE.)
+      CALL cp_cfm_create(work1_cfm, full_struct, set_zero=.TRUE.)
+      CALL cp_cfm_create(work2_cfm, full_struct, set_zero=.TRUE.)
       ALLOCATE (transdip(ntot, 1))
 
       !get the dipole in the AMEW basis

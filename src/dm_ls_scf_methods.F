@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -411,9 +411,9 @@ CONTAINS
       used_submatrix_sign_method = ls_scf_submatrix_sign_ns
       IF (PRESENT(submatrix_sign_method)) used_submatrix_sign_method = submatrix_sign_method
 
-      internal_mu_adjust = ((sign_method .EQ. ls_scf_sign_submatrix) .AND. &
-                            (used_submatrix_sign_method .EQ. ls_scf_submatrix_sign_direct_muadj .OR. &
-                             used_submatrix_sign_method .EQ. ls_scf_submatrix_sign_direct_muadj_lowmem))
+      internal_mu_adjust = ((sign_method == ls_scf_sign_submatrix) .AND. &
+                            (used_submatrix_sign_method == ls_scf_submatrix_sign_direct_muadj .OR. &
+                             used_submatrix_sign_method == ls_scf_submatrix_sign_direct_muadj_lowmem))
 
       IF (internal_mu_adjust) THEN
          CALL density_matrix_sign_internal_mu(matrix_p, trace, mu, sign_method, &
@@ -971,7 +971,7 @@ CONTAINS
 
       ! calculate the chemical potential by doing a bisection of fk(x0)-0.5, where fk is evaluated using the stored values for gamma
       ! E. Rubensson et al., Chem Phys Lett 432, 2006, 591-594
-      mu_a = 0.0_dp; mu_b = 1.0_dp; 
+      mu_a = 0.0_dp; mu_b = 1.0_dp;
       mu_fa = evaluate_trs4_polynomial(mu_a, gamma_values, i - 1) - 0.5_dp
       DO j = 1, 40
          mu_c = 0.5*(mu_a + mu_b)

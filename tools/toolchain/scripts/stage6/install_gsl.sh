@@ -7,7 +7,7 @@
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_NAME")/.." && pwd -P)"
 
 gsl_ver="2.8"
-gls_sha256="6a99eeed15632c6354895b1dd542ed5a855c0f15d9ad1326c6fe2b2c9e423190"
+gsl_sha256="6a99eeed15632c6354895b1dd542ed5a855c0f15d9ad1326c6fe2b2c9e423190"
 source "${SCRIPT_DIR}"/common_vars.sh
 source "${SCRIPT_DIR}"/tool_kit.sh
 source "${SCRIPT_DIR}"/signal_trap.sh
@@ -27,11 +27,7 @@ case "$with_gsl" in
     if verify_checksums "${install_lock_file}"; then
       echo "gsl-${gsl_ver} is already installed, skipping it."
     else
-      if [ -f gsl-${gsl_ver}.tar.gz ]; then
-        echo "gsl-${gsl_ver}.tar.gz is found"
-      else
-        download_pkg_from_cp2k_org "${gls_sha256}" "gsl-${gsl_ver}.tar.gz"
-      fi
+      retrieve_package "${gsl_sha256}" "gsl-${gsl_ver}.tar.gz"
       echo "Installing from scratch into ${pkg_install_dir}"
       [ -d gsl-${gsl_ver} ] && rm -rf gsl-${gsl_ver}
       tar -xzf gsl-${gsl_ver}.tar.gz
@@ -40,9 +36,9 @@ case "$with_gsl" in
         --libdir="${pkg_install_dir}/lib" \
         --disable-shared \
         --enable-static \
-        > configure.log 2>&1 || tail -n ${LOG_LINES} configure.log
-      make -j $(get_nprocs) > make.log 2>&1 || tail -n ${LOG_LINES} make.log
-      make -j $(get_nprocs) install > install.log 2>&1 || tail -n ${LOG_LINES} install.log
+        > configure.log 2>&1 || tail_excerpt configure.log
+      make -j $(get_nprocs) > make.log 2>&1 || tail_excerpt make.log
+      make -j $(get_nprocs) install > install.log 2>&1 || tail_excerpt install.log
       cd ..
       write_checksums "${install_lock_file}" "${SCRIPT_DIR}/stage6/$(basename ${SCRIPT_NAME})"
     fi
@@ -94,7 +90,7 @@ prepend_path PKG_CONFIG_PATH "${pkg_install_dir}/lib64/pkgconfig"
 prepend_path PKG_CONFIG_PATH "${pkg_install_dir}/lib/pkgconfig"
 export CP_LIBS="IF_MPI(${GSL_LIBS}|) \${CP_LIBS}"
 EOF
-  cat "${BUILDDIR}/setup_gsl" >> $SETUPFILE
+  filter_setup "${BUILDDIR}/setup_gsl" "${SETUPFILE}"
 fi
 
 load "${BUILDDIR}/setup_gsl"

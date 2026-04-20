@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -117,7 +117,7 @@ CONTAINS
                   zb = (2.0_dp*zet(j, iset))**(0.25_dp*(2*l + 3))
                   zetab = zet(i, iset) + zet(j, iset)
                   so(i, j) = za*zb/zetab**(l + 1.5_dp)
-                  IF (i .NE. j) so(j, i) = so(i, j)
+                  IF (i /= j) so(j, i) = so(i, j)
                END DO
             END DO
             info = 0
@@ -193,9 +193,9 @@ CONTAINS
                aux_basis%ly(ncgf) = indco(2, ico)
                aux_basis%lz(ncgf) = indco(3, ico)
                aux_basis%cgf_symbol(ncgf) = &
-                  cgf_symbol(aux_basis%n(ishell, iset), (/aux_basis%lx(ncgf), &
-                                                          aux_basis%ly(ncgf), &
-                                                          aux_basis%lz(ncgf)/))
+                  cgf_symbol(aux_basis%n(ishell, iset), [aux_basis%lx(ncgf), &
+                                                         aux_basis%ly(ncgf), &
+                                                         aux_basis%lz(ncgf)])
             END DO
             DO m = -lshell, lshell
                nsgf = nsgf + 1

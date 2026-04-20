@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -83,7 +83,9 @@ MODULE input_constants
 
    INTEGER, PARAMETER, PUBLIC               :: do_cell_cp2k = 1, &
                                                do_cell_cif = 2, &
-                                               do_cell_xsc = 3
+                                               do_cell_xsc = 3, &
+                                               do_cell_extxyz = 4, &
+                                               do_cell_pdb = 5
 
    INTEGER, PARAMETER, PUBLIC               :: rmsd_all = 0, &
                                                rmsd_list = 1, &
@@ -137,7 +139,8 @@ MODULE input_constants
                                                do_tamc = 17, &
                                                tree_mc_run = 18, &
                                                driver_run = 19, &
-                                               negf_run = 20
+                                               negf_run = 20, &
+                                               mimic_run = 21
 
    ! Run Types of Atom Code
    INTEGER, PARAMETER, PUBLIC               :: atom_no_run = 1, &
@@ -246,7 +249,9 @@ MODULE input_constants
                                                wfi_use_prev_wf_method_nr = 6, &
                                                wfi_ps_method_nr = 7, &
                                                wfi_frozen_method_nr = 8, &
-                                               wfi_aspc_nr = 9
+                                               wfi_aspc_nr = 9, &
+                                               wfi_gext_proj_nr = 10, &
+                                               wfi_gext_proj_qtr_nr = 11
 
    INTEGER, PARAMETER, PUBLIC               :: do_method_undef = 0, &
                                                do_method_gapw = 1, &
@@ -377,7 +382,8 @@ MODULE input_constants
                                                dump_xmol = 2, &
                                                dump_dcd = 3, &
                                                dump_pdb = 4, &
-                                               dump_dcd_aligned_cell = 5
+                                               dump_dcd_aligned_cell = 5, &
+                                               dump_extxyz = 6
 
    INTEGER, PARAMETER, PUBLIC               :: fmt_id_xyz = 1, &
                                                fmt_id_pdb = 2
@@ -415,6 +421,7 @@ MODULE input_constants
                                                do_region_massive = 2, &
                                                do_region_none = 3, &
                                                do_region_defined = 4, &
+                                               do_region_thermal = 5, &
                                                do_bondparm_covalent = 0, &
                                                do_bondparm_vdw = 1, &
                                                do_skip_11 = 0, &
@@ -510,7 +517,8 @@ MODULE input_constants
    INTEGER, PARAMETER, PUBLIC               :: ot_mini_sd = 1, ot_mini_cg = 2, ot_mini_diis = 3, ot_mini_broyden = 4
    INTEGER, PARAMETER, PUBLIC               :: ot_algo_taylor_or_diag = 1, ot_algo_irac = 2
    INTEGER, PARAMETER, PUBLIC               :: ot_chol_irac = 1, ot_poly_irac = 2, ot_lwdn_irac = 3
-   INTEGER, PARAMETER, PUBLIC               :: ls_none = 1, ls_2pnt = 2, ls_3pnt = 3, ls_gold = 4, ls_fit = 5
+   INTEGER, PARAMETER, PUBLIC               :: ls_none = 1, ls_2pnt = 2, ls_3pnt = 3, ls_gold = 4, ls_fit = 5, &
+                                               ls_adapt = 6
    INTEGER, PARAMETER, PUBLIC               :: ot_precond_none = 0, &
                                                ot_precond_full_single = 1, &
                                                ot_precond_full_kinetic = 2, &
@@ -582,6 +590,9 @@ MODULE input_constants
    INTEGER, PARAMETER, PUBLIC               :: tddfpt_kernel_none = 2, &
                                                tddfpt_kernel_full = 1, &
                                                tddfpt_kernel_stda = 0
+   INTEGER, PARAMETER, PUBLIC               :: no_sf_tddfpt = 0, &
+                                               tddfpt_sf_col = 1, &
+                                               tddfpt_sf_noncol = 2
    INTEGER, PARAMETER, PUBLIC               :: oe_none = 0, &
                                                oe_lb = 1, &
                                                oe_gllb = 2, &
@@ -896,7 +907,10 @@ MODULE input_constants
    ! Define identifier codes for smearing method
    INTEGER, PARAMETER, PUBLIC               :: smear_energy_window = 1, &
                                                smear_fermi_dirac = 2, &
-                                               smear_list = 3
+                                               smear_list = 3, &
+                                               smear_gaussian = 4, &
+                                               smear_mp = 5, &
+                                               smear_mv = 6
 
    ! Define identifier codes for mixing method
 
@@ -945,10 +959,6 @@ MODULE input_constants
 
    INTEGER, PARAMETER, PUBLIC               :: rtp_bse_ham_ks = 1, &
                                                rtp_bse_ham_g0w0 = 2
-
-   ! type of reference for RTP%PRINT%PROJECTION_MO
-   INTEGER, PARAMETER, PUBLIC               :: proj_mo_ref_scf = 1, &
-                                               proj_mo_ref_xas_tdp = 2
 
    ! how to solve polarizable force fields
    INTEGER, PARAMETER, PUBLIC               :: do_fist_pol_none = 1, &
@@ -1131,11 +1141,6 @@ MODULE input_constants
                                                do_lri_opt_coeff = 1, &
                                                do_lri_opt_exps = 2
 
-   ! Active space model parameters
-   INTEGER, PARAMETER, PUBLIC               :: hf_model = 100, &
-                                               rsdft_model = 101, &
-                                               dmft_model = 102
-
    ! Active space external solvers
    INTEGER, PARAMETER, PUBLIC               :: no_solver = 200, &
                                                qiskit_solver = 201
@@ -1249,7 +1254,12 @@ MODULE input_constants
                                                eri_operator_erf = 3, &
                                                eri_operator_erfc = 4, &
                                                eri_operator_gaussian = 5, &
-                                               eri_operator_trunc = 6
+                                               eri_operator_trunc = 6, &
+                                               eri_operator_lr_trunc = 7
+
+   INTEGER, PARAMETER, PUBLIC               :: eri_poisson_analytic = 1, &
+                                               eri_poisson_periodic = 2, &
+                                               eri_poisson_mt = 3
 
    INTEGER, PARAMETER, PUBLIC               :: do_eri_gpw = 0, &
                                                do_eri_mme = 1, &
@@ -1336,6 +1346,10 @@ MODULE input_constants
                                                sigma_PBE0_S1 = 2, &
                                                sigma_PBE0_S2 = 3, &
                                                sigma_PBE_S1 = 4
+   ! tblite method selection
+   INTEGER, PARAMETER, PUBLIC               :: gfn1xtb = 1, &
+                                               gfn2xtb = 2, &
+                                               ipea1xtb = 3
 
    ! SMEAGOL interface
    INTEGER, PARAMETER, PUBLIC               :: smeagol_bulklead_leftright = 1, &

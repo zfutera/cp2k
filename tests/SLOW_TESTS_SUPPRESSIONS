@@ -25,6 +25,7 @@ QS/regtest-admm-qps/O2-triplett-ADMMP-debug_forces.inp
 QS/regtest-almo-2/ion-pair.inp
 QS/regtest-almo-trustr/FHchain-dogleg.inp
 QS/regtest-dm-ls-scf-3/C_TRS4.inp
+QS/regtest-dm-ls-scf-4/H2O-dft-ls-STRESS-TENSOR.inp
 QS/regtest-hfx-block/H2-block-06.inp
 QS/regtest-hfx-ri/Ne-hybrid-periodic-shortrange.inp
 QS/regtest-hfx-ri/CH-hfx-ri-rho.inp
@@ -92,5 +93,8 @@ QS/regtest-tddfpt-force/h2o_tddfpt_newtonx.inp
 QS/regtest-tddfpt-force-gapw/h2o_t08.inp
 QS/regtest-smeagol-1/au-2x2x3-bulk.inp
 QS/regtest-smeagol-2/au-1x1x4-bulk.inp
+
+# Workaround for https://github.com/cp2k/cp2k/issues/4319
+QS/regtest-gpw-4/H2O_wavelet_XZ.inp
 
 #EOF

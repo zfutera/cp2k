@@ -6,8 +6,8 @@
 [ "${BASH_SOURCE[0]}" ] && SCRIPT_NAME="${BASH_SOURCE[0]}" || SCRIPT_NAME=$0
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_NAME")/.." && pwd -P)"
 
-spfft_ver="1.1.0"
-spfft_sha256="d4673b3135aebfa1c440723226fe976d518ff881285b3d4787f1aa8210eac81e"
+spfft_ver="1.1.1"
+spfft_sha256="675a048124a96b8c7f89d59d3ac0355833e28b38622e76c4d478ee91b25d766c"
 source "${SCRIPT_DIR}"/common_vars.sh
 source "${SCRIPT_DIR}"/tool_kit.sh
 source "${SCRIPT_DIR}"/signal_trap.sh
@@ -27,18 +27,14 @@ case "${with_spfft}" in
     if verify_checksums "${install_lock_file}"; then
       echo "SpFFT-${spfft_ver} is already installed, skipping it."
     else
-      if [ -f SpFFT-${spfft_ver}.tar.gz ]; then
-        echo "SpFFT-${spfft_ver}.tar.gz is found"
-      else
-        download_pkg_from_cp2k_org "${spfft_sha256}" "SpFFT-${spfft_ver}.tar.gz"
-
-      fi
+      retrieve_package "${spfft_sha256}" "SpFFT-${spfft_ver}.tar.gz"
+      echo "Installing from scratch into ${pkg_install_dir}"
       if [ "${MATH_MODE}" = "mkl" ]; then
         EXTRA_CMAKE_FLAGS="-DSPFFT_MKL=ON -DSPFFT_FFTW_LIB=MKL"
       else
         EXTRA_CMAKE_FLAGS=""
       fi
-      echo "Installing from scratch into ${pkg_install_dir}"
+
       [ -d SpFFT-${spfft_ver} ] && rm -rf SpFFT-${spfft_ver}
       tar -xzf SpFFT-${spfft_ver}.tar.gz
       cd SpFFT-${spfft_ver}
@@ -57,9 +53,9 @@ case "${with_spfft}" in
         -DSPFFT_FORTRAN=ON \
         -DSPFFT_INSTALL=ON \
         ${EXTRA_CMAKE_FLAGS} .. \
-        > cmake.log 2>&1 || tail -n ${LOG_LINES} cmake.log
-      make -j $(get_nprocs) > make.log 2>&1 || tail -n ${LOG_LINES} make.log
-      make -j $(get_nprocs) install > install.log 2>&1 || tail -n ${LOG_LINES} install.log
+        > cmake.log 2>&1 || tail_excerpt cmake.log
+      make -j $(get_nprocs) > make.log 2>&1 || tail_excerpt make.log
+      make -j $(get_nprocs) install > install.log 2>&1 || tail_excerpt install.log
 
       cd ..
 
@@ -81,8 +77,8 @@ case "${with_spfft}" in
           -DSPFFT_FORTRAN=ON \
           -DSPFFT_INSTALL=ON \
           -DSPFFT_GPU_BACKEND=CUDA \
-          ${EXTRA_CMAKE_FLAGS} .. > cmake.log 2>&1 || tail -n ${LOG_LINES} cmake.log
-        make -j $(get_nprocs) > make.log 2>&1 || tail -n ${LOG_LINES} make.log
+          ${EXTRA_CMAKE_FLAGS} .. > cmake.log 2>&1 || tail_excerpt cmake.log
+        make -j $(get_nprocs) > make.log 2>&1 || tail_excerpt make.log
         install -d ${pkg_install_dir}/lib/cuda
         [ -f src/libspfft.a ] && install -m 644 src/*.a ${pkg_install_dir}/lib/cuda >> install.log 2>&1
         [ -f src/libspfft.so ] && install -m 644 src/*.so ${pkg_install_dir}/lib/cuda >> install.log 2>&1
@@ -108,8 +104,8 @@ case "${with_spfft}" in
               -DSPFFT_FORTRAN=ON \
               -DSPFFT_INSTALL=ON \
               -DSPFFT_GPU_BACKEND=CUDA \
-              ${EXTRA_CMAKE_FLAGS} .. > cmake.log 2>&1 || tail -n ${LOG_LINES} cmake.log
-            make -j $(get_nprocs) > make.log 2>&1 || tail -n ${LOG_LINES} make.log
+              ${EXTRA_CMAKE_FLAGS} .. > cmake.log 2>&1 || tail_excerpt cmake.log
+            make -j $(get_nprocs) > make.log 2>&1 || tail_excerpt make.log
             install -d ${pkg_install_dir}/lib/cuda
             [ -f src/libspfft.a ] && install -m 644 src/*.a ${pkg_install_dir}/lib/cuda >> install.log 2>&1
             [ -f src/libspfft.so ] && install -m 644 src/*.so ${pkg_install_dir}/lib/cuda >> install.log 2>&1
@@ -129,8 +125,8 @@ case "${with_spfft}" in
               -DSPLA_STATIC=ON \
               -DSPLA_GPU_BACKEND=ROCM \
               ${EXTRA_CMAKE_FLAGS} .. \
-              > cmake.log 2>&1 || tail -n ${LOG_LINES} cmake.log
-            make -j $(get_nprocs) > make.log 2>&1 || tail -n ${LOG_LINES} make.log
+              > cmake.log 2>&1 || tail_excerpt cmake.log
+            make -j $(get_nprocs) > make.log 2>&1 || tail_excerpt make.log
             install -d ${pkg_install_dir}/lib/rocm
             [ -f src/libspla.a ] && install -m 644 src/*.a ${pkg_install_dir}/lib/rocm >> install.log 2>&1
             [ -f src/libspla.so ] && install -m 644 src/*.so ${pkg_install_dir}/lib/rocm >> install.log 2>&1
@@ -197,7 +193,7 @@ export SpFFT_ROOT="${pkg_install_dir}"
 export SPFFT_INCLUDE_DIR="${pkg_install_dir}/include"
 export CP_LIBS="IF_MPI(${SPFFT_LIBS}|) \${CP_LIBS}"
 EOF
-  cat "${BUILDDIR}/setup_spfft" >> $SETUPFILE
+  filter_setup "${BUILDDIR}/setup_spfft" "${SETUPFILE}"
 fi
 
 load "${BUILDDIR}/setup_spfft"

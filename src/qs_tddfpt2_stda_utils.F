@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -421,7 +421,7 @@ CONTAINS
 
       DO ispin = 1, nspins
          CALL cp_fm_get_info(work%ctransformed(ispin), ncol_global=nactive)
-         CALL cp_dbcsr_sm_fm_multiply(work%shalf, sub_env%mos_occ(ispin), &
+         CALL cp_dbcsr_sm_fm_multiply(work%shalf, sub_env%mos_active(ispin), &
                                       work%ctransformed(ispin), nactive, alpha=1.0_dp, beta=0.0_dp)
       END DO
 

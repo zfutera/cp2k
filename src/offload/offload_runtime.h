@@ -1,6 +1,6 @@
 /*----------------------------------------------------------------------------*/
 /*  CP2K: A general program to perform molecular dynamics simulations         */
-/*  Copyright 2000-2025 CP2K developers group <https://cp2k.org>              */
+/*  Copyright 2000-2026 CP2K developers group <https://cp2k.org>              */
 /*                                                                            */
 /*  SPDX-License-Identifier: BSD-3-Clause                                     */
 /*----------------------------------------------------------------------------*/
@@ -22,6 +22,7 @@
 
 #if defined(__OFFLOAD_CUDA) || defined(__OFFLOAD_HIP) ||                       \
     defined(__OFFLOAD_OPENCL)
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -76,9 +77,9 @@ typedef int offloadError_t;
     if (error != offloadSuccess) {                                             \
       const char *const name = offloadGetErrorName(error);                     \
       if (NULL != name && '\0' != *name) {                                     \
-        fprintf(stderr, "ERROR: \"%s\" at %s:%d\n", name, __FILE__, __LINE__); \
+        fprintf(stderr, "ERROR: \"%s\" at %s:%i\n", name, __FILE__, __LINE__); \
       } else {                                                                 \
-        fprintf(stderr, "ERROR %i: %s:%d\n", (int)error, __FILE__, __LINE__);  \
+        fprintf(stderr, "ERROR %i: %s:%i\n", (int)error, __FILE__, __LINE__);  \
       }                                                                        \
       abort();                                                                 \
     }                                                                          \
@@ -431,14 +432,28 @@ static inline void offloadFreeHost(void *ptr) {
  * \brief Wrapper around cudaStreamWaitEvent.
  ******************************************************************************/
 static inline void offloadStreamWaitEvent(offloadStream_t stream,
-                                          offloadEvent_t event, const int val) {
+                                          offloadEvent_t event) {
 #if defined(__OFFLOAD_CUDA)
-  OFFLOAD_CHECK(cudaStreamWaitEvent(stream, event, val));
+  OFFLOAD_CHECK(cudaStreamWaitEvent(stream, event, 0 /*flags*/));
 #elif defined(__OFFLOAD_HIP)
-  OFFLOAD_CHECK(hipStreamWaitEvent(stream, event, val));
+  OFFLOAD_CHECK(hipStreamWaitEvent(stream, event, 0 /*flags*/));
 #elif defined(__OFFLOAD_OPENCL)
-  assert(0 == val); /* TODO */
   OFFLOAD_CHECK(c_dbcsr_acc_stream_wait_event(stream, event));
+#endif
+}
+
+/*******************************************************************************
+ * \brief Wrapper around cudaEventQuery.
+ ******************************************************************************/
+static inline bool offloadEventQuery(offloadEvent_t event) {
+#if defined(__OFFLOAD_CUDA)
+  return offloadSuccess == cudaEventQuery(event);
+#elif defined(__OFFLOAD_HIP)
+  return offloadSuccess == hipEventQuery(event);
+#elif defined(__OFFLOAD_OPENCL)
+  c_dbcsr_acc_bool_t has_occurred;
+  OFFLOAD_CHECK(c_dbcsr_acc_event_query(event, &has_occurred));
+  return (bool)has_occurred;
 #endif
 }
 

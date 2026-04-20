@@ -1,6 +1,6 @@
 /*----------------------------------------------------------------------------*/
 /*  CP2K: A general program to perform molecular dynamics simulations         */
-/*  Copyright 2000-2025 CP2K developers group <https://cp2k.org>              */
+/*  Copyright 2000-2026 CP2K developers group <https://cp2k.org>              */
 /*                                                                            */
 /*  SPDX-License-Identifier: GPL-2.0-or-later                                 */
 /*----------------------------------------------------------------------------*/
@@ -42,7 +42,7 @@ static torch_c_tensor_t *tensor_from_array(const torch::Dtype dtype,
 static void *get_data_ptr(const torch_c_tensor_t *tensor,
                           const torch::Dtype dtype, const int ndims,
                           int64_t sizes[]) {
-  assert(tensor->type().scalarType() == dtype);
+  assert(tensor->scalar_type() == dtype);
   assert(tensor->ndimension() == ndims);
   for (int i = 0; i < ndims; i++) {
     sizes[i] = tensor->size(i);
@@ -55,6 +55,17 @@ static void *get_data_ptr(const torch_c_tensor_t *tensor,
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/*******************************************************************************
+ * \brief Creates a Torch tensor from an array of int32s.
+ *        The passed array has to outlive the tensor!
+ * \author Ole Schuett
+ ******************************************************************************/
+void torch_c_tensor_from_array_int32(torch_c_tensor_t **tensor,
+                                     const bool req_grad, const int ndims,
+                                     const int64_t sizes[], int32_t source[]) {
+  *tensor = tensor_from_array(torch::kInt32, req_grad, ndims, sizes, source);
+}
 
 /*******************************************************************************
  * \brief Creates a Torch tensor from an array of floats.
@@ -87,6 +98,17 @@ void torch_c_tensor_from_array_double(torch_c_tensor_t **tensor,
                                       const bool req_grad, const int ndims,
                                       const int64_t sizes[], double source[]) {
   *tensor = tensor_from_array(torch::kFloat64, req_grad, ndims, sizes, source);
+}
+
+/*******************************************************************************
+ * \brief Returns the data_ptr and sizes of a Torch tensor of int32s.
+ *        The returned pointer is only valide during the tensor's live time!
+ * \author Ole Schuett
+ ******************************************************************************/
+void torch_c_tensor_data_ptr_int32(const torch_c_tensor_t *tensor,
+                                   const int ndims, int64_t sizes[],
+                                   int32_t **data_ptr) {
+  *data_ptr = (int32_t *)get_data_ptr(tensor, torch::kInt32, ndims, sizes);
 }
 
 /*******************************************************************************
@@ -189,6 +211,11 @@ void torch_c_dict_release(torch_c_dict_t *dict) { delete (dict); }
  ******************************************************************************/
 void torch_c_model_load(torch_c_model_t **model_out, const char *filename) {
   assert(*model_out == NULL);
+  // JIT Fusion strategy optimization, hardcode dynamic 10, see also
+  // https://github.com/mir-group/pair_nequip_allegro.git
+  torch::jit::FusionStrategy strategy = {
+      {torch::jit::FusionBehavior::DYNAMIC, 10}};
+  torch::jit::setFusionStrategy(strategy);
   torch::jit::Module *model = new torch::jit::Module();
   *model = torch::jit::load(filename, get_device());
   model->eval(); // Set to evaluation mode to disable gradients, drop-out, etc.

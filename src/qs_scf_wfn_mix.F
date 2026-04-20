@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -147,7 +147,7 @@ CONTAINS
             CALL section_vals_val_get(update_section, "RESULT_SCALE", i_rep_section=i_rep, r_val=result_scale)
 
             mark_ind = 1
-            IF (mark_number .GT. 0) result_mo_index = marked_states(mark_number, result_spin_index, mark_ind)
+            IF (mark_number > 0) result_mo_index = marked_states(mark_number, result_spin_index, mark_ind)
 
             ! The MO that will be added to the previous one, 'x'
             CALL section_vals_val_get(update_section, "ORIG_TYPE", i_rep_section=i_rep, &
@@ -159,7 +159,7 @@ CONTAINS
             CALL section_vals_val_get(update_section, "ORIG_SCALE", i_rep_section=i_rep, r_val=orig_scale)
 
             IF (orig_type == wfn_mix_orig_virtual) mark_ind = 2
-            IF (mark_number .GT. 0) orig_mo_index = marked_states(mark_number, orig_spin_index, mark_ind)
+            IF (mark_number > 0) orig_mo_index = marked_states(mark_number, orig_spin_index, mark_ind)
 
             CALL section_vals_val_get(wfn_mix_section, "OVERWRITE_MOS", l_val=overwrite_mos)
 
@@ -274,14 +274,12 @@ CONTAINS
             END IF
 
             IF (output_unit > 0) THEN
-               WRITE (output_unit, '()')
-               WRITE (output_unit, '(T2,A,T61,E20.4)') &
+               WRITE (UNIT=output_unit, FMT="(/,T2,A,T61,E20.4)") &
                   "Maximum deviation from MO S-orthonormality", orthonormality
-               WRITE (output_unit, '(T2,A)') "Writing new MOs to file"
+               WRITE (UNIT=output_unit, FMT="(T2,A)") "Writing new MOs to file"
             END IF
 
-            ! *** Write WaveFunction restart file ***
-
+            ! Write wavefunction restart file
             DO ispin = 1, SIZE(mos_new)
                IF (overwrite_mos) THEN
                   CALL cp_fm_to_fm(mos_new(ispin)%mo_coeff, mos(ispin)%mo_coeff)
@@ -291,7 +289,8 @@ CONTAINS
                IF (mos(1)%use_mo_coeff_b) &
                   CALL copy_fm_to_dbcsr(mos_new(ispin)%mo_coeff, mos(ispin)%mo_coeff_b)
             END DO
-            CALL write_mo_set_to_restart(mos_new, particle_set, dft_section=dft_section, qs_kind_set=qs_kind_set)
+            CALL write_mo_set_to_restart(mos_new, particle_set, dft_section=dft_section, &
+                                         qs_kind_set=qs_kind_set)
          END IF
 
          DO ispin = 1, SIZE(mos_new)

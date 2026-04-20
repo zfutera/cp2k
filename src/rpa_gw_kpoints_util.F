@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -276,7 +276,6 @@ CONTAINS
       REAL(KIND=dp), OPTIONAL                            :: min_eigval
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'cp_cfm_power'
-      COMPLEX(KIND=dp), PARAMETER :: czero = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
 
       COMPLEX(KIND=dp), ALLOCATABLE, DIMENSION(:)        :: eigenvalues_exponent
       INTEGER                                            :: handle, i, ncol_global, nrow_global
@@ -291,10 +290,8 @@ CONTAINS
       ! Test that matrix is square
       CALL cp_cfm_get_info(matrix, nrow_global=nrow_global, ncol_global=ncol_global)
       CPASSERT(nrow_global == ncol_global)
-      ALLOCATE (eigenvalues(nrow_global))
-      eigenvalues(:) = 0.0_dp
-      ALLOCATE (eigenvalues_exponent(nrow_global))
-      eigenvalues_exponent(:) = czero
+      ALLOCATE (eigenvalues(nrow_global), SOURCE=0.0_dp)
+      ALLOCATE (eigenvalues_exponent(nrow_global), SOURCE=z_zero)
 
       ! Diagonalize matrix: get eigenvectors and eigenvalues
       CALL cp_cfm_heevd(matrix, cfm_work, eigenvalues)
@@ -306,7 +303,7 @@ CONTAINS
             IF (PRESENT(min_eigval)) THEN
                eigenvalues_exponent(i) = CMPLX(min_eigval, 0.0_dp, KIND=dp)
             ELSE
-               eigenvalues_exponent(i) = czero
+               eigenvalues_exponent(i) = z_zero
             END IF
          END IF
       END DO
@@ -656,7 +653,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE get_dummys
 
 ! **************************************************************************************************
 !> \brief ...
@@ -683,7 +680,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE release_dummys
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1124,7 +1121,7 @@ CONTAINS
             iatom = atom_from_RI_index(row_indices(irow))
             jatom = atom_from_RI_index(col_indices(jcol))
 
-            IF (iatom .NE. iatom_old .OR. jatom .NE. jatom_old) THEN
+            IF (iatom /= iatom_old .OR. jatom /= jatom_old) THEN
 
                ! symmetrize=.FALSE. necessary since we already have a symmetrized index_to_cell
                CALL compute_weight_re_im(weight_re, weight_im, &
@@ -1417,7 +1414,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE compute_wkp_W
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1444,7 +1441,7 @@ CONTAINS
                qs_env%mp2_env%ri_rpa_im_time%kpoints_Sigma_no_xc, &
                para_env)
 
-      nkp_grid_G(1:3) = (/1, 1, 1/)
+      nkp_grid_G(1:3) = [1, 1, 1]
 
       CALL get_qs_env(qs_env=qs_env, para_env=para_env)
 
@@ -1534,8 +1531,6 @@ CONTAINS
       LOGICAL, OPTIONAL                                  :: with_xc_terms
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'create_kp_and_calc_kp_orbitals'
-      COMPLEX(KIND=dp), PARAMETER :: cone = CMPLX(1.0_dp, 0.0_dp, KIND=dp), &
-         czero = CMPLX(0.0_dp, 0.0_dp, KIND=dp), ione = CMPLX(0.0_dp, 1.0_dp, KIND=dp)
 
       INTEGER                                            :: handle, i_dim, i_re_im, ikp, ispin, nkp, &
                                                             nspins
@@ -1630,16 +1625,16 @@ CONTAINS
          DO ikp = 1, nkp
 
             CALL copy_dbcsr_to_fm(mat_ks_kp(ikp, 1)%matrix, kpoints%kp_env(ikp)%kpoint_env%wmat(1, ispin))
-            CALL cp_cfm_scale_and_add_fm(czero, cksmat, cone, kpoints%kp_env(ikp)%kpoint_env%wmat(1, ispin))
+            CALL cp_cfm_scale_and_add_fm(z_zero, cksmat, z_one, kpoints%kp_env(ikp)%kpoint_env%wmat(1, ispin))
 
             CALL copy_dbcsr_to_fm(mat_ks_kp(ikp, 2)%matrix, kpoints%kp_env(ikp)%kpoint_env%wmat(2, ispin))
-            CALL cp_cfm_scale_and_add_fm(cone, cksmat, ione, kpoints%kp_env(ikp)%kpoint_env%wmat(2, ispin))
+            CALL cp_cfm_scale_and_add_fm(z_one, cksmat, gaussi, kpoints%kp_env(ikp)%kpoint_env%wmat(2, ispin))
 
             CALL copy_dbcsr_to_fm(mat_s_kp(ikp, 1)%matrix, fm_work)
-            CALL cp_cfm_scale_and_add_fm(czero, csmat, cone, fm_work)
+            CALL cp_cfm_scale_and_add_fm(z_zero, csmat, z_one, fm_work)
 
             CALL copy_dbcsr_to_fm(mat_s_kp(ikp, 2)%matrix, fm_work)
-            CALL cp_cfm_scale_and_add_fm(cone, csmat, ione, fm_work)
+            CALL cp_cfm_scale_and_add_fm(z_one, csmat, gaussi, fm_work)
 
             kp => kpoints%kp_env(ikp)%kpoint_env
 

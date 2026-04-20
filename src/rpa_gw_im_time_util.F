@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -436,7 +436,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE get_tensor_3c_overl_int_gw
 
 ! **************************************************************************************************
 !> \brief reflect from V = (A,B|B,A) to V_reflected = (B,A|A,B) where A belongs to the block of the molecule
@@ -575,14 +575,10 @@ CONTAINS
       ALLOCATE (buffer_rec(0:para_env%num_pe - 1))
       ALLOCATE (buffer_send(0:para_env%num_pe - 1))
 
-      ALLOCATE (num_entries_rec(0:para_env%num_pe - 1))
-      ALLOCATE (num_blocks_rec(0:para_env%num_pe - 1))
-      ALLOCATE (num_entries_send(0:para_env%num_pe - 1))
-      ALLOCATE (num_blocks_send(0:para_env%num_pe - 1))
-      num_entries_rec = 0
-      num_blocks_rec = 0
-      num_entries_send = 0
-      num_blocks_send = 0
+      ALLOCATE (num_entries_rec(0:para_env%num_pe - 1), SOURCE=0)
+      ALLOCATE (num_blocks_rec(0:para_env%num_pe - 1), SOURCE=0)
+      ALLOCATE (num_entries_send(0:para_env%num_pe - 1), SOURCE=0)
+      ALLOCATE (num_blocks_send(0:para_env%num_pe - 1), SOURCE=0)
 
       CALL dbcsr_iterator_readonly_start(iter, mat_orig)
       DO WHILE (dbcsr_iterator_blocks_left(iter))
@@ -666,7 +662,7 @@ CONTAINS
          offset = entry_counter(imepos)
 
          buffer_send(imepos)%msg(offset + 1:offset + block_size) = &
-            RESHAPE(data_block(1:row_size, 1:col_size), (/block_size/))
+            RESHAPE(data_block(1:row_size, 1:col_size), [block_size])
 
          block = block_counter(imepos) + 1
 
@@ -707,7 +703,7 @@ CONTAINS
                   offset = buffer_rec(imepos)%indx(i_block, 3)
 
                   data_block(:, :) = RESHAPE(buffer_rec(imepos)%msg(offset + 1:offset + row_size*col_size), &
-                                             (/row_size, col_size/))
+                                             [row_size, col_size])
 
                END IF
 
@@ -735,7 +731,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE reflect_mat_row
 
 ! **************************************************************************************************
 !> \brief ...
@@ -834,7 +830,7 @@ CONTAINS
          ycell = index_to_cell(2, icell)
          zcell = index_to_cell(3, icell)
 
-         cell_vector(1:3) = MATMUL(hmat, REAL((/xcell, ycell, zcell/), dp))
+         cell_vector(1:3) = MATMUL(hmat, REAL([xcell, ycell, zcell], dp))
 
          rab_cell_i(1:3) = pbc(particle_set(iatom)%r(1:3), cell) - &
                            (pbc(particle_set(jatom)%r(1:3), cell) + cell_vector(1:3))
@@ -853,7 +849,7 @@ CONTAINS
          ycell = index_to_cell(2, icell)
          zcell = index_to_cell(3, icell)
 
-         cell_vector(1:3) = MATMUL(hmat, REAL((/xcell, ycell, zcell/), dp))
+         cell_vector(1:3) = MATMUL(hmat, REAL([xcell, ycell, zcell], dp))
 
          rab_cell_i(1:3) = pbc(particle_set(iatom)%r(1:3), cell) - &
                            (pbc(particle_set(jatom)%r(1:3), cell) + cell_vector(1:3))

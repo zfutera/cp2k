@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -15,7 +15,8 @@ MODULE cp_control_types
    USE eeq_input,                       ONLY: eeq_solver_type
    USE input_constants,                 ONLY: do_full_density,&
                                               rtp_bse_ham_G0W0,&
-                                              rtp_method_tddft
+                                              rtp_method_tddft,&
+                                              use_mom_ref_coac
    USE kinds,                           ONLY: default_path_length,&
                                               default_string_length,&
                                               dp
@@ -29,11 +30,28 @@ MODULE cp_control_types
                                               smeagol_control_type
    USE xas_control,                     ONLY: xas_control_release,&
                                               xas_control_type
+   USE xas_tdp_types,                   ONLY: xas_tdp_control_create,&
+                                              xas_tdp_control_release,&
+                                              xas_tdp_control_type
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
 
    PRIVATE
+
+!***************************************************************************************************
+!\brief Control parameters for hairy-probes DFT
+!***************************************************************************************************
+   TYPE hairy_probes_type
+      REAL(KIND=dp)                        :: alpha = 0.0_dp     ! solution probes parameter
+      REAL(KIND=dp)                        :: mu = 0.0_dp        ! chemical potenatial of electrons in reservoir
+      REAL(KIND=dp)                        :: T = 0.0_dp         ! temperature of electrons in reservoir
+      REAL(KIND=dp)                        :: eps_hp = 0.0_dp    ! tolerance for accuracy checks on occupation numbers
+      INTEGER                              :: natoms = 0, &
+                                              last_ao = 0, &
+                                              first_ao = 0
+      INTEGER, DIMENSION(:), POINTER       :: atom_ids => NULL() ! atom ids to which the probes are attached
+   END TYPE hairy_probes_type
 
 ! **************************************************************************************************
 ! \brief Control parameters for pw grids
@@ -103,6 +121,25 @@ MODULE cp_control_types
       LOGICAL                              :: is_proj_mo = .FALSE.
       TYPE(proj_mo_p_type), DIMENSION(:), &
          POINTER                :: proj_mo_list => NULL()
+      ! Switch to turn on moments trace saving
+      LOGICAL                              :: save_local_moments = .FALSE.
+      INTEGER                              :: moment_trace_ref_type = use_mom_ref_coac
+      REAL(dp), DIMENSION(:), POINTER      :: moment_trace_user_ref_point => NULL()
+      REAL(dp)                             :: ft_damping = -1.0_dp
+      REAL(dp)                             :: ft_t0 = 0.0_dp
+      ! Index 1 : number of the element, Index 2 : coordinates
+      ! e.g. if xx and xz elements are to be printed
+      ! print_pol_elements(1,1) = 1
+      ! print_pol_elements(1,2) = 1
+      ! print_pol_elements(2,1) = 1
+      ! print_pol_elements(2,2) = 3
+      INTEGER, DIMENSION(:, :), POINTER    :: print_pol_elements => NULL()
+      LOGICAL                              :: pade_requested = .FALSE.
+      REAL(dp)                             :: pade_e_min = 0.0_dp
+      REAL(dp)                             :: pade_e_step = 0.02_dp
+      REAL(dp)                             :: pade_e_max = 100.0_dp
+      REAL(dp)                             :: pade_fit_e_min = 0.0_dp
+      REAL(dp)                             :: pade_fit_e_max = 300.0_dp
    END TYPE rtp_control_type
 
 ! **************************************************************************************************
@@ -140,9 +177,11 @@ MODULE cp_control_types
       INTEGER                              :: gfn_type = 1
       !
       LOGICAL                              :: do_ewald = .FALSE.
+      LOGICAL                              :: do_tblite = .FALSE.
       !
       INTEGER                              :: sto_ng = 0
       INTEGER                              :: h_sto_ng = 0
+      INTEGER                              :: tblite_method = 0
       !
       INTEGER                              :: vdw_type = -1
       CHARACTER(LEN=default_path_length)   :: parameter_file_path = ""
@@ -234,7 +273,9 @@ MODULE cp_control_types
                                               lmax_rho0 = 0, &
                                               lmax_sphere = 0, &
                                               quadrature = 0
-      LOGICAL                              :: lrho1_eq_lrho0 = .FALSE.
+      LOGICAL                              :: accurate_xcint = .FALSE.
+      REAL(KIND=dp)                        :: aweights = 0.0_dp
+      REAL(KIND=dp), DIMENSION(:), POINTER  :: aw => NULL()
       LOGICAL                              :: alpha0_hard_from_input = .FALSE., &
                                               force_paw = .FALSE., &
                                               non_paw_atoms = .FALSE., &
@@ -481,6 +522,8 @@ MODULE cp_control_types
       INTEGER                              :: nprocs = 0
       !> type of kernel function/approximation to use
       INTEGER                              :: kernel = 0
+      !> type of spin excitations to compute
+      INTEGER                              :: spinflip = 0
       !> for full kernel, do we have HFX/ADMM
       LOGICAL                              :: do_hfx = .FALSE.
       LOGICAL                              :: do_admm = .FALSE.
@@ -497,6 +540,8 @@ MODULE cp_control_types
       INTEGER                              :: oe_corr = 0
       !> eigenvalue shifts
       REAL(KIND=dp)                        :: ev_shift = 0.0_dp, eos_shift = 0.0_dp
+      !> active orbitals
+      INTEGER, DIMENSION(2)                :: nactive = -1
       !> target accuracy
       REAL(kind=dp)                        :: conv = 0.0_dp
       !> the smallest excitation amplitude to print
@@ -512,6 +557,10 @@ MODULE cp_control_types
       LOGICAL                              :: do_lrigpw = .FALSE.
       !> smeared occupation
       LOGICAL                              :: do_smearing = .FALSE.
+      !> dynamical correlation
+      LOGICAL                              :: do_bse = .FALSE.
+      LOGICAL                              :: do_bse_w_only = .FALSE.
+      LOGICAL                              :: do_bse_gw_only = .FALSE.
       ! automatic generation of auxiliary basis for LRI-TDDFT
       INTEGER                              :: auto_basis_p_lri_aux = 1
       !> use symmetric definition of ADMM Kernel correction
@@ -563,6 +612,20 @@ MODULE cp_control_types
    END TYPE tddfpt2_control_type
 
 ! **************************************************************************************************
+!> \brief
+! **************************************************************************************************
+   TYPE rixs_control_type
+
+      LOGICAL                              :: enabled = .FALSE.
+      INTEGER                              :: core_states = 0
+      INTEGER                              :: valence_states = 0
+
+      TYPE(tddfpt2_control_type), POINTER     :: tddfpt2_control => NULL()
+      TYPE(xas_tdp_control_type), POINTER     :: xas_tdp_control => NULL()
+
+   END TYPE rixs_control_type
+
+! **************************************************************************************************
 ! \brief Control parameters for a DFT calculation
 ! \par History
 !      10.2019 added variables related to surface dipole correction [Soumya Ghosh]
@@ -574,12 +637,15 @@ MODULE cp_control_types
       TYPE(rtp_control_type), POINTER      :: rtp_control => NULL()
       TYPE(sccs_control_type), POINTER     :: sccs_control => NULL()
       TYPE(tddfpt2_control_type), POINTER  :: tddfpt2_control => NULL()
+      TYPE(rixs_control_type), POINTER     :: rixs_control => NULL()
       TYPE(xas_control_type), POINTER      :: xas_control => NULL()
       TYPE(expot_control_type), POINTER    :: expot_control => NULL()
       TYPE(maxwell_control_type), POINTER  :: maxwell_control => NULL()
       TYPE(smeagol_control_type), POINTER  :: smeagol_control => NULL()
       TYPE(efield_p_type), POINTER, &
          DIMENSION(:)                      :: efield_fields => NULL()
+      TYPE(hairy_probes_type), POINTER, &
+         DIMENSION(:)                      :: probe => NULL()
       INTEGER                              :: nspins = 0, &
                                               charge = 0, &
                                               multiplicity = 0, &
@@ -629,7 +695,8 @@ MODULE cp_control_types
                                               correct_el_density_dip = .FALSE., &
                                               do_sccs = .FALSE., &
                                               apply_embed_pot = .FALSE., &
-                                              apply_dmfet_pot = .FALSE.
+                                              apply_dmfet_pot = .FALSE., &
+                                              hairy_probes = .FALSE.
    END TYPE dft_control_type
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'cp_control_types'
@@ -640,6 +707,7 @@ MODULE cp_control_types
              qs_control_type, &
              gapw_control_type, &
              tddfpt2_control_type, &
+             rixs_control_type, &
              proj_mo_type, &
              efield_type, &
              mulliken_restraint_type, &
@@ -654,7 +722,8 @@ MODULE cp_control_types
              rtp_control_type, &
              sccs_control_type, &
              stda_control_type, &
-             smeared_type
+             smeared_type, &
+             hairy_probes_type
 
    ! Public subroutines
 
@@ -664,7 +733,9 @@ MODULE cp_control_types
              admm_control_release, &
              maxwell_control_create, &
              expot_control_create, &
-             ddapc_control_create
+             ddapc_control_create, &
+             rixs_control_create, &
+             rixs_control_release
 
 CONTAINS
 
@@ -778,6 +849,7 @@ CONTAINS
       NULLIFY (dft_control%xas_control)
       NULLIFY (dft_control%qs_control)
       NULLIFY (dft_control%tddfpt2_control)
+      NULLIFY (dft_control%rixs_control)
       NULLIFY (dft_control%efield_fields)
       NULLIFY (dft_control%period_efield)
       NULLIFY (dft_control%admm_control)
@@ -786,11 +858,14 @@ CONTAINS
       NULLIFY (dft_control%smeagol_control)
       NULLIFY (dft_control%rtp_control)
       NULLIFY (dft_control%sccs_control)
+      NULLIFY (dft_control%probe)
       dft_control%do_sccs = .FALSE.
       dft_control%apply_embed_pot = .FALSE.
       dft_control%apply_dmfet_pot = .FALSE.
+      dft_control%hairy_probes = .FALSE.
       CALL qs_control_create(dft_control%qs_control)
       CALL tddfpt2_control_create(dft_control%tddfpt2_control)
+      CALL rixs_control_create(dft_control%rixs_control)
       CALL smeagol_control_create(dft_control%smeagol_control)
    END SUBROUTINE dft_control_create
 
@@ -804,8 +879,11 @@ CONTAINS
    SUBROUTINE dft_control_release(dft_control)
       TYPE(dft_control_type), INTENT(INOUT)              :: dft_control
 
+      INTEGER                                            :: i
+
       CALL qs_control_release(dft_control%qs_control)
       CALL tddfpt2_control_release(dft_control%tddfpt2_control)
+      CALL rixs_control_release(dft_control%rixs_control) ! maybe check first if allocated
       IF (ASSOCIATED(dft_control%xas_control)) THEN
          CALL xas_control_release(dft_control%xas_control)
          DEALLOCATE (dft_control%xas_control)
@@ -815,6 +893,12 @@ CONTAINS
       CALL maxwell_control_release(dft_control%maxwell_control)
       CALL smeagol_control_release(dft_control%smeagol_control)
       CALL efield_fields_release(dft_control%efield_fields)
+      IF (ASSOCIATED(dft_control%probe)) THEN
+         DO i = 1, SIZE(dft_control%probe)
+            DEALLOCATE (dft_control%probe(i)%atom_ids)
+         END DO
+         DEALLOCATE (dft_control%probe)
+      END IF
       IF (ASSOCIATED(dft_control%sccs_control)) DEALLOCATE (dft_control%sccs_control)
       IF (ASSOCIATED(dft_control%period_efield)) THEN
          DEALLOCATE (dft_control%period_efield)
@@ -885,6 +969,9 @@ CONTAINS
             DEALLOCATE (qs_control%e_cutoff)
          END IF
          IF (ASSOCIATED(qs_control%gapw_control)) THEN
+            IF (ASSOCIATED(qs_control%gapw_control%aw)) THEN
+               DEALLOCATE (qs_control%gapw_control%aw)
+            END IF
             DEALLOCATE (qs_control%gapw_control)
          END IF
          IF (ASSOCIATED(qs_control%ddapc_restraint_control)) THEN
@@ -940,6 +1027,39 @@ CONTAINS
 
       CALL timestop(handle)
    END SUBROUTINE tddfpt2_control_release
+
+! **************************************************************************************************
+!> \brief Creates and initializes the rixs_control_type
+!> \param rixs_control the type to initialize
+! **************************************************************************************************
+   SUBROUTINE rixs_control_create(rixs_control)
+      TYPE(rixs_control_type), POINTER                   :: rixs_control
+
+      CPASSERT(.NOT. ASSOCIATED(rixs_control))
+      ALLOCATE (rixs_control)
+
+      NULLIFY (rixs_control%tddfpt2_control)
+      CALL tddfpt2_control_create(rixs_control%tddfpt2_control)
+      NULLIFY (rixs_control%xas_tdp_control)
+      CALL xas_tdp_control_create(rixs_control%xas_tdp_control)
+
+   END SUBROUTINE rixs_control_create
+
+! **************************************************************************************************
+!> \brief Releases the rixs_control_type
+!> \param rixs_control ...
+! **************************************************************************************************
+   SUBROUTINE rixs_control_release(rixs_control)
+      TYPE(rixs_control_type), POINTER                   :: rixs_control
+
+      IF (ASSOCIATED(rixs_control)) THEN
+         CALL tddfpt2_control_release(rixs_control%tddfpt2_control)
+         CALL xas_tdp_control_release(rixs_control%xas_tdp_control)
+
+         DEALLOCATE (rixs_control)
+      END IF
+
+   END SUBROUTINE rixs_control_release
 
 ! **************************************************************************************************
 !> \brief ...

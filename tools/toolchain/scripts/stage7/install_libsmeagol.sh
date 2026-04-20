@@ -16,10 +16,6 @@ source "${INSTALLDIR}"/toolchain.env
 
 [ -f "${BUILDDIR}/setup_libsmeagol" ] && rm "${BUILDDIR}/setup_libsmeagol"
 
-LIBSMEAGOL_CFLAGS=""
-LIBSMEAGOL_LDFLAGS=""
-LIBSMEAGOL_LIBS=""
-
 ! [ -d "${BUILDDIR}" ] && mkdir -p "${BUILDDIR}"
 cd "${BUILDDIR}"
 
@@ -36,11 +32,7 @@ case "${with_libsmeagol}" in
     if verify_checksums "${install_lock_file}"; then
       echo "libsmeagol-${libsmeagol_ver} is already installed, skipping it."
     else
-      if [ -f libsmeagol-${libsmeagol_ver}.tar.gz ]; then
-        echo "libsmeagol-${libsmeagol_ver}.tar.gz is found"
-      else
-        download_pkg_from_cp2k_org "${libsmeagol_sha256}" "libsmeagol-${libsmeagol_ver}.tar.gz"
-      fi
+      retrieve_package "${libsmeagol_sha256}" "libsmeagol-${libsmeagol_ver}.tar.gz"
       echo "Installing from scratch into ${pkg_install_dir}"
       [ -d libsmeagol-${libsmeagol_ver} ] && rm -rf libsmeagol-${libsmeagol_ver}
       tar -xzf libsmeagol-${libsmeagol_ver}.tar.gz
@@ -57,7 +49,7 @@ case "${with_libsmeagol}" in
         FCFLAGS="-DMPI -fallow-argument-mismatch ${FCFLAGS}" \
         FCFLAGS_FIXEDFORM="${FCFLAGS_FIX}" \
         FCFLAGS_FREEFORM="${FCFLAGS_FREE}" \
-        > make.log 2>&1 || tail -n ${LOG_LINES} make.log
+        > make.log 2>&1 || tail_excerpt make.log
       # The libsmeagol makefile does not provide an install target
       [ -d ${pkg_install_dir} ] && rm -rf ${pkg_install_dir}
       mkdir ${pkg_install_dir} && cp -a lib ${pkg_install_dir}
@@ -108,7 +100,7 @@ export CP_LDFLAGS="\${CP_LDFLAGS} IF_MPI(${LIBSMEAGOL_LDFLAGS}|)"
 export CP_LIBS="IF_MPI(${LIBSMEAGOL_LIBS}|) \${CP_LIBS}"
 export LIBSMEAGOL_ROOT="${pkg_install_dir}"
 EOF
-  cat "${BUILDDIR}/setup_libsmeagol" >> $SETUPFILE
+  filter_setup "${BUILDDIR}/setup_libsmeagol" "${SETUPFILE}"
 fi
 
 load "${BUILDDIR}/setup_libsmeagol"

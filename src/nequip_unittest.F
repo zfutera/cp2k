@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -213,7 +213,10 @@ PROGRAM nequip_unittest
    DO iatom = 1, natoms
       WRITE (*, *) forces(:, iatom)*angstrom/evolt
    END DO
-   CPASSERT(ABS(-14985.4443_dp - REAL(total_energy(1, 1), kind=dp)) < 2e-3_dp)
+
+   IF (ABS(-14985.4443_dp - REAL(total_energy(1, 1), kind=dp)) > 2e-3_dp) THEN
+      CPABORT("NequIP unittest failed :-(")
+   END IF
 
    CALL torch_tensor_release(total_energy_tensor)
    CALL torch_tensor_release(atomic_energy_tensor)
@@ -223,7 +226,7 @@ PROGRAM nequip_unittest
    CALL torch_model_release(model)
    DEALLOCATE (edge_index, edge_cell_shift, pos, cell, atom_types)
 
-   WRITE (*, *) "NequIP unittest was successfully :-)"
+   WRITE (*, *) "NequIP unittest was successful :-)"
 
 CONTAINS
 

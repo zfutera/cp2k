@@ -1,6 +1,6 @@
 #!-------------------------------------------------------------------------------------------------!
 #!   CP2K: A general program to perform molecular dynamics simulations                             !
-#!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                  !
+#!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                  !
 #!                                                                                                 !
 #!   SPDX-License-Identifier: GPL-2.0-or-later                                                     !
 #!-------------------------------------------------------------------------------------------------!
@@ -11,19 +11,8 @@ cmake_minimum_required(VERSION 3.24)
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 # =================================================================================================
-# REQUIRE OUT-OF-SOURCE BUILDS
-file(TO_CMAKE_PATH "${PROJECT_BINARY_DIR}/CMakeLists.txt" LOC_PATH)
-if(EXISTS "${LOC_PATH}")
-  message(
-    FATAL_ERROR
-      "You cannot build in a source directory (or any directory with a CMakeLists.txt file). Please make a build subdirectory."
-  )
-endif()
-
-# =================================================================================================
 # PROJECT AND VERSION
 include(CMakeDependentOption)
-include(GitSubmodule)
 include(CustomTargets)
 
 cmake_policy(SET CMP0048 NEW)
@@ -37,10 +26,19 @@ project(
   cp2k
   DESCRIPTION "CP2K"
   HOMEPAGE_URL "https://www.cp2k.org"
-  VERSION "2025.1"
+  VERSION "2026.1"
   LANGUAGES Fortran C CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/modules")
+
+# Require out-of-source builds
+file(TO_CMAKE_PATH "${PROJECT_BINARY_DIR}/CMakeLists.txt" LOC_PATH)
+if(EXISTS "${LOC_PATH}")
+  message(
+    FATAL_ERROR
+      "You cannot build in a source directory (or any directory with a CMakeLists.txt file). Please make a build subdirectory."
+  )
+endif()
 
 # set language and standard.
 #
@@ -50,12 +48,12 @@ list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/modules")
 #
 
 if(NOT DEFINED CMAKE_CUDA_STANDARD)
-  set(CMAKE_CUDA_STANDARD 11)
+  set(CMAKE_CUDA_STANDARD 14)
   set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 endif()
 
 if(NOT DEFINED CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 14)
+  set(CMAKE_CXX_STANDARD 17)
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
 endif()
 
@@ -70,22 +68,23 @@ if(NOT DEFINED CMAKE_HIP_STANDARD)
 endif()
 
 # remove NDEBUG flag
-string(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_RELEASE ${CMAKE_C_FLAGS_RELEASE})
-string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE ${CMAKE_CXX_FLAGS_RELEASE})
+string(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
+string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELEASE
+               "${CMAKE_CXX_FLAGS_RELEASE}")
 string(REPLACE "-DNDEBUG" "" CMAKE_Fortran_FLAGS_RELEASE
-               ${CMAKE_Fortran_FLAGS_RELEASE})
+               "${CMAKE_Fortran_FLAGS_RELEASE}")
 string(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_RELWITHDEBINFO
-               ${CMAKE_C_FLAGS_RELWITHDEBINFO})
+               "${CMAKE_C_FLAGS_RELWITHDEBINFO}")
 string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_RELWITHDEBINFO
-               ${CMAKE_CXX_FLAGS_RELWITHDEBINFO})
+               "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
 string(REPLACE "-DNDEBUG" "" CMAKE_Fortran_FLAGS_RELWITHDEBINFO
-               ${CMAKE_Fortran_FLAGS_RELWITHDEBINFO})
+               "${CMAKE_Fortran_FLAGS_RELWITHDEBINFO}")
 string(REPLACE "-DNDEBUG" "" CMAKE_C_FLAGS_MINSIZEREL
-               ${CMAKE_C_FLAGS_MINSIZEREL})
+               "${CMAKE_C_FLAGS_MINSIZEREL}")
 string(REPLACE "-DNDEBUG" "" CMAKE_CXX_FLAGS_MINSIZEREL
-               ${CMAKE_CXX_FLAGS_MINSIZEREL})
+               "${CMAKE_CXX_FLAGS_MINSIZEREL}")
 string(REPLACE "-DNDEBUG" "" CMAKE_Fortran_FLAGS_MINSIZEREL
-               ${CMAKE_Fortran_FLAGS_MINSIZEREL})
+               "${CMAKE_Fortran_FLAGS_MINSIZEREL}")
 
 find_package(PkgConfig)
 
@@ -93,7 +92,7 @@ find_package(PkgConfig)
 # Define the paths for static libraries and executables
 # ##############################################################################
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY
-    ${cp2k_BINARY_DIR}/lib
+    ${PROJECT_BINARY_DIR}/lib
     CACHE PATH "Single output directory for building all libraries.")
 
 # Search for rocm in common locations
@@ -123,26 +122,29 @@ option(CP2K_USE_EVERYTHING
        "Enable all dependencies. They can be individually turned off again."
        OFF)
 
+option(CP2K_USE_ACE "Enable ACE support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_DEEPMD "Enable DeePMD support" ${CP2K_USE_EVERYTHING})
 option(CP2K_USE_DFTD4 "Enable DFTD4 support" ${CP2K_USE_EVERYTHING})
-option(CP2K_USE_DEEPMD "Enable DeePMD" ${CP2K_USE_EVERYTHING})
-option(CP2K_USE_FFTW3 "Enable fftw3 support" ${CP2K_USE_EVERYTHING})
-option(CP2K_USE_MPI "Enable MPI support" ${CP2K_USE_EVERYTHING})
-option(CP2K_USE_LIBINT2 "Enable libint2 support" ${CP2K_USE_EVERYTHING})
-option(CP2K_USE_VORI "Enable libvori support" ${CP2K_USE_EVERYTHING})
-option(CP2K_USE_SPGLIB "Enable spglib support" ${CP2K_USE_EVERYTHING})
-option(CP2K_USE_LIBXC "Enable libxc support" ${CP2K_USE_EVERYTHING})
-option(CP2K_USE_LIBTORCH "Enable libtorch support" ${CP2K_USE_EVERYTHING})
-option(CP2K_USE_GRPP "Enable libgrpp support" ${CP2K_USE_EVERYTHING})
-option(CP2K_USE_TREXIO "Enable trexio support" ${CP2K_USE_EVERYTHING})
-option(CP2K_USE_HDF5 "Enable HDF5 support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_TBLITE "Enable TBLITE support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_FFTW3 "Enable FFTW3 support" ${CP2K_USE_EVERYTHING})
 option(CP2K_USE_GREENX "Enable GreenX support" ${CP2K_USE_EVERYTHING})
-
-option(CP2K_USE_STATIC_BLAS "Link against static version of BLAS/LAPACK" OFF)
-option(BUILD_SHARED_LIBS "Build cp2k shared library" ON)
+option(CP2K_USE_HDF5 "Enable HDF5 support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_LIBINT2 "Enable Libint2 support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_LIBTORCH "Enable LibTorch support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_OPENPMD "Enable support for I/O via openPMD" OFF)
+option(CP2K_USE_LIBXC "Enable LibXC support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_MPI "Enable MPI support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_PEXSI "Enable PEXSI support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_SPGLIB "Enable Spglib support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_TREXIO "Enable TREXIO support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_VORI "Enable Libvori support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_CRAY_PM_ENERGY "Enable Cray PM energy framework" OFF)
+option(BUILD_SHARED_LIBS "Build CP2K shared library" ON)
 option(
   CP2K_USE_FFTW3_WITH_MKL
-  "MKL has its own compatible implementation of the fftw library. This option, when ON, will use the separate and original fftw library."
+  "MKL has its own compatible implementation of the FFTW3 library. This option, when ON, will use the separate and original FFTW3 library."
   OFF)
+option(CP2K_USE_DBCSR_CONFIG "Return DBCSR cmake configuration parameters" OFF)
 
 # MPI-enabled options
 cmake_dependent_option(CP2K_USE_COSMA "Enable COSMA support"
@@ -151,37 +153,58 @@ cmake_dependent_option(CP2K_USE_DLAF "Enable DLA-Future support"
                        ${CP2K_USE_EVERYTHING} "CP2K_USE_MPI" OFF)
 cmake_dependent_option(CP2K_USE_ELPA "Enable ELPA support"
                        ${CP2K_USE_EVERYTHING} "CP2K_USE_MPI" OFF)
-cmake_dependent_option(CP2K_USE_LIBSMEAGOL "Enable libSMEAGOL support"
+cmake_dependent_option(CP2K_USE_LIBSMEAGOL "Enable LibSMEAGOL support"
                        ${CP2K_USE_EVERYTHING} "CP2K_USE_MPI" OFF)
 cmake_dependent_option(CP2K_USE_MPI_F08 "Enable MPI Fortran 2008 interface"
+                       ${CP2K_USE_EVERYTHING} "CP2K_USE_MPI" OFF)
+cmake_dependent_option(CP2K_USE_PEXSI "Enable PEXSI support"
                        ${CP2K_USE_EVERYTHING} "CP2K_USE_MPI" OFF)
 cmake_dependent_option(CP2K_USE_PLUMED "Enable PLUMED2 support"
                        ${CP2K_USE_EVERYTHING} "CP2K_USE_MPI" OFF)
 cmake_dependent_option(CP2K_USE_SIRIUS "Enable SIRIUS support"
                        ${CP2K_USE_EVERYTHING} "CP2K_USE_MPI" OFF)
-cmake_dependent_option(CP2K_USE_SPLA "Enable SPLA support"
+cmake_dependent_option(CP2K_USE_SPLA "Enable SpLA support"
                        ${CP2K_USE_EVERYTHING} "CP2K_USE_MPI" OFF)
-
+cmake_dependent_option(CP2K_USE_MIMIC "Enable MIMIC support"
+                       ${CP2K_USE_EVERYTHING} "CP2K_USE_MPI" OFF)
 cmake_dependent_option(
   CP2K_USE_LIBXSMM "Enable libxsmm support" ${CP2K_USE_EVERYTHING}
   "NOT CP2K_USE_ACCEL MATCHES \"OPENCL\"" ON)
 cmake_dependent_option(CP2K_USE_LIBVDWXC "Enable libvdwxc support with SIRIUS"
                        ${CP2K_USE_EVERYTHING} "CP2K_USE_SIRIUS" OFF)
 
+# do not turn it on if sirius is built with the toolchain
+cmake_dependent_option(
+  CP2K_USE_SIRIUS_DFTD4 "Enable dftd3 and dftd4 sirius support" OFF
+  "CP2K_USE_SIRIUS" OFF)
+cmake_dependent_option(
+  CP2K_USE_SIRIUS_VCSQNM "Enable variable cell shape relaxation in SIRIUS" OFF
+  "CP2K_USE_SIRIUS" OFF)
+
+cmake_dependent_option(CP2K_USE_SIRIUS_NLCG "Enable nlcg method in SIRIUS" OFF
+                       "CP2K_USE_SIRIUS" OFF)
+
+cmake_dependent_option(CP2K_USE_SpFFT "Enable spare FFT in SIRIUS" OFF
+                       "CP2K_USE_SIRIUS" OFF)
+
 cmake_dependent_option(
   CP2K_DBCSR_USE_CPU_ONLY "Disable the DBCSR accelerated backend" OFF
-  "NOT CP2K_USE_ACCEL MATCHES \"OPENCL\"" OFF)
+  "NOT CP2K_USE_ACCEL MATCHES \"OPENCL|HIP|CUDA\"" OFF)
 
 cmake_dependent_option(
-  CP2K_ENABLE_DBM_GPU "Disable the dbm accelerated backend (mostly GPU)." ON
-  "CP2K_USE_ACCEL" OFF)
-
-cmake_dependent_option(
-  CP2K_ENABLE_GRID_GPU "Disable acceleration for grid related functions." ON
+  CP2K_ENABLE_ELPA_GPU "Enable acceleration for elpa related functions." ON
   "CP2K_USE_ACCEL MATCHES \"HIP|CUDA\"" OFF)
 
 cmake_dependent_option(
-  CP2K_ENABLE_PW_GPU "Disable the ffts accelerated backend (mostly GPU)." ON
+  CP2K_ENABLE_GRID_GPU "Enable acceleration for grid related functions." ON
+  "CP2K_USE_ACCEL MATCHES \"HIP|CUDA\"" OFF)
+
+cmake_dependent_option(
+  CP2K_ENABLE_DBM_GPU "Enable the dbm accelerated backend (mostly GPU)." ON
+  "CP2K_USE_ACCEL" OFF)
+
+cmake_dependent_option(
+  CP2K_ENABLE_PW_GPU "Enable the ffts accelerated backend (mostly GPU)." ON
   "CP2K_USE_ACCEL MATCHES \"HIP|CUDA\"" OFF)
 
 cmake_dependent_option(
@@ -191,13 +214,12 @@ cmake_dependent_option(
 cmake_dependent_option(CP2K_ENABLE_ELPA_OPENMP_SUPPORT
                        "Enable ELPA OpenMP support" ON "CP2K_USE_ELPA" OFF)
 cmake_dependent_option(CP2K_ENABLE_FFTW3_OPENMP_SUPPORT
-                       "Enable FFTW OpenMP support" ON "CP2K_USE_FFTW3" OFF)
+                       "Enable FFTW3 OpenMP support" ON "CP2K_USE_FFTW3" OFF)
 cmake_dependent_option(CP2K_ENABLE_FFTW3_THREADS_SUPPORT
-                       "Enable FFTW threads support" OFF "CP2K_USE_FFTW3" OFF)
+                       "Enable FFTW3 threads support" OFF "CP2K_USE_FFTW3" OFF)
 
 cmake_dependent_option(
-  CP2K_USE_CUSOLVER_MP
-  "Use Nvidia gpu accelerated eigensolver. Only active when CUDA is ON" OFF
+  CP2K_USE_CUSOLVER_MP "Enable cuSOLVERMp. Only active when CUDA is ON" OFF
   "CP2K_USE_ACCEL MATCHES \"CUDA\"" OFF)
 
 cmake_dependent_option(CP2K_USE_NVHPC OFF "Enable Nvidia NVHPC kit"
@@ -205,17 +227,41 @@ cmake_dependent_option(CP2K_USE_NVHPC OFF "Enable Nvidia NVHPC kit"
 
 cmake_dependent_option(
   CP2K_USE_SPLA_GEMM_OFFLOADING ON
-  "Enable SPLA dgemm offloading (only valid with gpu support on)"
+  "Enable SpLA dgemm offloading (only valid with GPU support on)"
   "(NOT CP2K_USE_ACCEL MATCHES \"NONE\") AND (CP2K_USE_SPLA)" OFF)
+
+cmake_dependent_option(
+  CP2K_USE_CRAY_PM_ACCEL_ENERGY ON
+  "Enable CRAY power management framework with gpu support"
+  "(NOT CP2K_USE_ACCEL MATCHES \"NONE\") AND (CP2K_USE_CRAY_PM_ENERGY)" OFF)
+
+cmake_dependent_option(
+  CP2K_USE_LIBVDWXC OFF
+  "Compile CP2K with libvdwxc support when SIRIUS is compiled with it"
+  "CP2K_USE_SIRIUS" OFF)
 
 set(CP2K_BLAS_VENDOR
     "auto"
-    CACHE STRING "BLAS library for computations on host")
+    CACHE STRING "blas vendor/generic libraries")
+
+set_property(
+  CACHE CP2K_BLAS_VENDOR
+  PROPERTY STRINGS
+           "auto"
+           "MKL"
+           "OpenBLAS"
+           "SCI"
+           "GenericBLAS"
+           "Armpl"
+           "FlexiBLAS"
+           "Atlas"
+           "NVHPCBlas"
+           "CUSTOM")
 
 set(CP2K_SCALAPACK_VENDOR_LIST "MKL" "SCI" "GENERIC" "auto")
 set(CP2K_SCALAPACK_VENDOR
     "auto"
-    CACHE STRING "scalapack vendor/generic backend")
+    CACHE STRING "ScaLAPACK vendor/generic backend")
 set_property(CACHE CP2K_SCALAPACK_VENDOR PROPERTY STRINGS
                                                   ${CP2K_SCALAPACK_VENDOR_LIST})
 
@@ -227,10 +273,10 @@ endif()
 
 set(CP2K_DATA_DIR
     "default"
-    CACHE STRING "Set the location for cp2k data")
+    CACHE STRING "Set the location for CP2K data")
 
 # ##############################################################################
-# gpu related options
+# GPU related options
 # ##############################################################################
 
 set(CP2K_SUPPORTED_ACCELERATION_TARGETS CUDA HIP OPENCL NONE)
@@ -282,9 +328,17 @@ set_property(CACHE CP2K_USE_ACCEL
 set(__cp2k_ext "")
 
 if(CP2K_USE_MPI)
-  set(__cp2k_ext "psmp")
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(__cp2k_ext "pdbg")
+  else()
+    set(__cp2k_ext "psmp")
+  endif()
 else()
-  set(__cp2k_ext "ssmp")
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(__cp2k_ext "sdbg")
+  else()
+    set(__cp2k_ext "ssmp")
+  endif()
 endif()
 
 # we can run the src consistency checks without actually searching for any
@@ -306,7 +360,7 @@ if(CP2K_ENABLE_CONSISTENCY_CHECKS)
 endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY
-    ${cp2k_BINARY_DIR}/bin
+    ${PROJECT_BINARY_DIR}/bin
     CACHE PATH "Single output directory for building all executables.")
 
 # Python
@@ -327,9 +381,11 @@ if(NOT Python_EXECUTABLE)
 endif()
 
 # get the git hash Get the latest abbreviated commit hash of the working branch
+# As a fall back, e.g. in a container, try reading a file named "REVISION".
 execute_process(
-  COMMAND git log -1 --format=%h
+  COMMAND bash -c "git log -1 --format=%h || cat REVISION"
   WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+  ERROR_QUIET
   OUTPUT_VARIABLE CP2K_GIT_HASH
   OUTPUT_STRIP_TRAILING_WHITESPACE)
 
@@ -362,14 +418,15 @@ if(CP2K_USE_MPI)
     MPI
     COMPONENTS ${REQUIRED_MPI_COMPONENTS}
     REQUIRED)
-
+  get_target_property(MPI_INCLUDE_DIRS MPI::MPI_Fortran
+                      INTERFACE_INCLUDE_DIRECTORIES)
   if(NOT MPI_Fortran_HAVE_F90_MODULE)
     message(
       FATAL_ERROR
-        "\
-The listed MPI implementation does not provide the required mpi.mod interface. \
-When using the GNU compiler in combination with Intel MPI, please use the \
-Intel MPI compiler wrappers. Check the INSTALL.md for more information.")
+        "The listed MPI implementation does not provide the required mpi.mod interface."
+        " When using the GNU compiler in combination with Intel MPI, please use the"
+        " Intel MPI compiler wrappers. Check the INSTALL.md for more information."
+    )
   endif()
   if("${MPI_Fortran_LIBRARY_VERSION_STRING}" MATCHES "Open MPI v2.1"
      OR "${MPI_Fortran_LIBRARY_VERSION_STRING}" MATCHES "Open MPI v3.1")
@@ -387,7 +444,7 @@ find_package(Lapack REQUIRED) # also calls find_package(BLAS)
 # SMM (Small Matrix-Matrix multiplication)
 if(CP2K_USE_LIBXSMM)
   find_package(LibXSMM REQUIRED)
-  message(STATUS "Using LibXSMM for Small Matrix Multiplication")
+  message(STATUS "Using LIBXSMM for Small Matrix Multiplication")
 endif()
 
 # in practice it is always for any decent configuration. But I add a flags to
@@ -414,7 +471,7 @@ if((CP2K_USE_ACCEL MATCHES CUDA) OR (CP2K_USE_ACCEL MATCHES HIP))
   set(CP2K_GPU_ARCH_NUMBER_Mi300 gfx942)
 
   # CMAKE_HIP_ARCHITECTURES and CMAKE_CUDA_ARCHITECTURES are the prefered
-  # mechanism to set the gpu architecture. We still offer the CP2K_WITH_GPU
+  # mechanism to set the GPU architecture. We still offer the CP2K_WITH_GPU
   # option to avoid breaking the ci/cd or any other scripts based on this
   # option.
 
@@ -471,7 +528,7 @@ set(CP2K_USE_CUDA OFF)
 set(CP2K_USE_OPENCL OFF)
 
 if(CP2K_USE_ACCEL MATCHES "CUDA")
-  option(CP2K_WITH_CUDA_PROFILING "Enable CUDA profiling" OFF)
+  option(CP2K_WITH_GPU_PROFILING "Enable GPU profiling" OFF)
   # P100 is the default target.
 
   # allow for unsupported compilers (gcc/cuda version mismatch)
@@ -489,7 +546,7 @@ if(CP2K_USE_ACCEL MATCHES "CUDA")
   message("-----------------------------------------------------------\n")
 
   message(STATUS "GPU architecture number: ${CMAKE_CUDA_ARCHITECTURES}")
-  message(STATUS "GPU profiling enabled: ${CP2K_WITH_CUDA_PROFILING}")
+  message(STATUS "GPU profiling enabled: ${CP2K_WITH_GPU_PROFILING}")
 
   if(WITH_CUDA_PROFILING)
     find_library(
@@ -506,7 +563,7 @@ if(CP2K_USE_ACCEL MATCHES "CUDA")
     find_package(CuSolverMP REQUIRED)
   endif()
 
-  message(STATUS "CUDA compiler and libraries found\n")
+  message(STATUS "CUDA compiler and libraries found")
 
 elseif(CP2K_USE_ACCEL MATCHES "HIP")
   message("\n------------------------------------------------------------")
@@ -529,7 +586,7 @@ elseif(CP2K_USE_ACCEL MATCHES "HIP")
     set(CMAKE_HIP_FLAGS "-O0 -g")
   endif()
 
-  # Find hip
+  # Find HIP
   find_package(hipfft REQUIRED IMPORTED CONFIG)
   find_package(hipblas REQUIRED IMPORTED CONFIG)
 
@@ -550,9 +607,6 @@ elseif(CP2K_USE_ACCEL MATCHES "HIP")
       set(CMAKE_HIP_ARCHITECTURES "gfx942:xnack+")
     endif()
   endif()
-elseif(CP2K_USE_ACCEL MATCHES "OPENCL")
-  find_package(OpenCL REQUIRED)
-  set(CP2K_USE_OPENCL ON)
 endif()
 
 message("\n------------------------------------------------------------")
@@ -562,9 +616,53 @@ message("------------------------------------------------------------\n")
 # PACKAGE DISCOVERY (compiler configuration can impact package discovery)
 find_package(OpenMP REQUIRED COMPONENTS Fortran C CXX)
 
-find_package(DBCSR 2.6 REQUIRED)
+message("\n------------------------------------------------------------")
+message("-                          DBCSR                           -")
+message("------------------------------------------------------------\n")
 
-# ==================================
+if(CP2K_USE_DBCSR_CONFIG)
+  find_package(DBCSR 2.9 REQUIRED CONFIG)
+  if(CP2K_USE_MPI AND NOT DBCSR_USE_MPI)
+    message(
+      FATAL_ERROR
+        "DBCSR needs to be compiled with MPI support when CP2K MPI support is enabled"
+    )
+  endif()
+else()
+  find_package(DBCSR 2.6 REQUIRED)
+endif()
+
+# Discover CP2K_OPENCL_BACKEND. DBCSR must be discovered prior (DBCSR_DIR).
+if(CP2K_USE_ACCEL MATCHES "OPENCL")
+  message("\n------------------------------------------------------------")
+  message("-                          OPENCL                          -")
+  message("------------------------------------------------------------\n")
+  find_package(OpenCL REQUIRED)
+
+  set(CP2K_OPENCL_BACKEND "${DBCSR_DIR}/../../../include/acc/opencl")
+  if(NOT EXISTS ${CP2K_OPENCL_BACKEND})
+    get_target_property(CP2K_DBCSR_INCLUDE_DIRS DBCSR::dbcsr
+                        INTERFACE_INCLUDE_DIRECTORIES)
+    list(GET CP2K_DBCSR_INCLUDE_DIRS 0 CP2K_DBCSR_INCLUDE_DIR)
+    set(CP2K_OPENCL_BACKEND "${CP2K_DBCSR_INCLUDE_DIR}/acc/opencl")
+  endif()
+
+  set(CP2K_OPENCL_SCRIPT
+      "${CP2K_OPENCL_BACKEND}/../../../share/opencl/acc_opencl.sh")
+  if(EXISTS ${CP2K_OPENCL_SCRIPT})
+    set(CP2K_OPENCL_COMMON common/opencl_atomics.h common/opencl_common.h)
+    list(TRANSFORM CP2K_OPENCL_COMMON PREPEND ${CP2K_OPENCL_BACKEND}/)
+    set(CP2K_USE_OPENCL ON)
+    message(STATUS "OpenCL backend found")
+  else()
+    message(FATAL_ERROR "OpenCL backend not found")
+  endif()
+endif()
+
+message("\n------------------------------------------------------------")
+message("-                    Other dependencies                    -")
+message("------------------------------------------------------------\n")
+
 if(CP2K_USE_ELPA)
   find_package(Elpa REQUIRED)
 endif()
@@ -593,6 +691,9 @@ if(CP2K_USE_COSMA)
         " COSMA needs to be build with scalapack offloading support. COSTA_SCALAPACK and COSMA_SCALAPACK should probably be set properly"
     )
   endif()
+  add_library(cp2k::cosma INTERFACE IMPORTED)
+  target_link_libraries(cp2k::cosma INTERFACE cosma::cosma_prefixed_pxgemm
+                                              cosma::cosma)
 endif()
 
 if(CP2K_USE_VORI)
@@ -600,7 +701,7 @@ if(CP2K_USE_VORI)
 endif()
 
 if(CP2K_USE_DLAF)
-  find_package(DLAFFortran REQUIRED)
+  find_package(DLAFFortran 0.4.0 REQUIRED)
 
   get_target_property(CP2K_DLAF_INCLUDE_DIRS DLAF::DLAF
                       INTERFACE_INCLUDE_DIRECTORIES)
@@ -611,7 +712,7 @@ endif()
 
 # FFTW3
 
-# we set this variable to ON when we want fftw3 support (with or without MKL).
+# we set this variable to ON when we want FFTW3 support (with or without MKL)
 set(CP2K_USE_FFTW3_ OFF)
 if(CP2K_USE_FFTW3)
   if(NOT CP2K_BLAS_VENDOR MATCHES "MKL" OR CP2K_USE_FFTW3_WITH_MKL)
@@ -619,14 +720,14 @@ if(CP2K_USE_FFTW3)
     if(CP2K_ENABLE_FFTW3_THREADS_SUPPORT AND CP2K_ENABLE_FFTW3_OPENMP_SUPPORT)
       message(
         FATAL_ERROR
-          "Fftw3 threads and openmp supports can not be used at the same time")
+          "FFTW3 threads and openmp supports can not be used at the same time")
     endif()
 
     if((CP2K_ENABLE_FFTW3_THREADS_SUPPORT) AND (NOT TARGET
                                                 cp2k::FFTW3::fftw3_threads))
       message(
         FATAL_ERROR
-          "fftw3 was compiled without multithreading support (--enable-threads option in the fftw build system)."
+          "FFTW3 was compiled without multithreading support (--enable-threads option in the FFTW3 build system)."
       )
     endif()
 
@@ -634,24 +735,32 @@ if(CP2K_USE_FFTW3)
                                               ))
       message(
         FATAL_ERROR
-          "fftw3 was compiled without openmp support  (--enable-openmp option in the fftw build system)."
+          "FFTW3 was compiled without openmp support (--enable-openmp option in the FFTW3 build system)."
       )
     endif()
     set(CP2K_USE_FFTW3_ ON)
   else()
     message("-- Using the MKL implementation of FFTW3.")
+    foreach(DIR ${CP2K_BLAS_INCLUDE_DIRS})
+      if(EXISTS ${DIR}/fftw)
+        list(APPEND CP2K_FFTW3_INCLUDE_DIRS ${DIR}/fftw)
+        include_directories(${DIR}/fftw)
+      endif()
+    endforeach()
     set(CP2K_USE_FFTW3_MKL_ ON)
   endif()
 endif()
 
-# libint
+# Libint
 if(CP2K_USE_LIBINT2)
   find_package(Libint2 REQUIRED)
 endif()
 
-# spglib
+# Spglib
 if(CP2K_USE_SPGLIB)
-  find_package(Spglib CONFIG REQUIRED)
+  find_package(Spglib REQUIRED CONFIG)
+  get_target_property(CP2K_SPGLIB_INCLUDE_DIRS Spglib::symspg
+                      INTERFACE_INCLUDE_DIRECTORIES)
 endif()
 
 if(CP2K_USE_LIBSMEAGOL)
@@ -659,40 +768,73 @@ if(CP2K_USE_LIBSMEAGOL)
 endif()
 
 if(CP2K_USE_SPLA)
-  find_package(SPLA REQUIRED)
-  get_target_property(SPLA_INCLUDE_DIRS SPLA::spla
+  find_package(SPLA REQUIRED CONFIG)
+  get_target_property(CP2K_SPLA_INCLUDE_DIRS SPLA::spla
                       INTERFACE_INCLUDE_DIRECTORIES)
-  if(NOT SPLA_INCLUDE_DIRS)
-    set(SPLA_INCLUDE_DIRS "/usr/include;/usr/include/spla")
-  endif()
-
+  get_target_property(CP2K_SPLA_LINK_LIBRARIES SPLA::spla
+                      INTERFACE_LINK_LIBRARIES)
   if(NOT SPLA_GPU_BACKEND AND CP2K_USE_GEMM_OFFLOADING)
     set(CP2K_USE_GEMM_OFFLOADING OFF)
     message(
       FATAL_ERROR
-        "SPLA should be compiled with GPU support if the gemm offloading is requested. Use -DCP2K_USE_GEMM_OFFLOADING=OFF otherwise"
+        "SpLA should be compiled with GPU support if the gemm offloading is requested. Use -DCP2K_USE_GEMM_OFFLOADING=OFF otherwise"
     )
   endif()
 endif()
 
 if(CP2K_USE_DFTD4)
   find_package(dftd4 REQUIRED)
-
-  get_target_property(CP2K_DFTD4_LINK_LIBRARIES dftd4::dftd4
-                      INTERFACE_LINK_LIBRARIES)
-  get_target_property(CP2K_DFTD4_LIB_LINK_LIBRARIES dftd4::dftd4-lib
-                      INTERFACE_LINK_LIBRARIES)
-  get_target_property(CP2K_DFTD4_INCLUDE_DIR dftd4::dftd4-lib
-                      INTERFACE_INCLUDE_DIRECTORIES)
+  # Detect dftd4_VERSION from dftd4-config-version.cmake
+  if(dftd4_VERSION VERSION_LESS "4.0.0")
+    message(STATUS "DFTD4: found version ${dftd4_VERSION}, using v3.x API")
+    set(CP2K_USE_DFTD4_V3 ON)
+  else()
+    set(CP2K_USE_DFTD4_V3 OFF)
+  endif()
 endif()
 
 if(CP2K_USE_DEEPMD)
   find_package(DeePMD REQUIRED CONFIG)
 endif()
 
+if(CP2K_USE_PEXSI)
+  find_package(PEXSI REQUIRED CONFIG)
+  get_target_property(CP2K_PEXSI_INCLUDE_DIRS PEXSI::PEXSI
+                      INTERFACE_INCLUDE_DIRECTORIES)
+  get_target_property(CP2K_PEXSI_LINK_LIBRARIES PEXSI::PEXSI
+                      INTERFACE_LINK_LIBRARIES)
+endif()
+
+if(CP2K_USE_ACE)
+  find_package(ACE REQUIRED)
+  get_target_property(CP2K_ACE_INCLUDE_DIRS cp2k::ACE
+                      INTERFACE_INCLUDE_DIRECTORIES)
+  get_target_property(CP2K_ACE_LINK_LIBRARIES cp2k::ACE
+                      INTERFACE_LINK_LIBRARIES)
+endif()
+
+if(CP2K_USE_TBLITE)
+  find_package(mctc-lib REQUIRED)
+  find_package(toml-f REQUIRED)
+  find_package(dftd4 REQUIRED)
+  find_package(s-dftd3 REQUIRED)
+  find_package(tblite REQUIRED)
+  add_library(cp2k::tblite INTERFACE IMPORTED)
+  target_link_libraries(
+    cp2k::tblite INTERFACE tblite::tblite mctc-lib::mctc-lib dftd4::dftd4
+                           toml-f::toml-f s-dftd3::s-dftd3)
+  # Detect dftd4_VERSION from dftd4-config-version.cmake
+  if(dftd4_VERSION VERSION_LESS "4.0.0")
+    message(STATUS "DFTD4: found version ${dftd4_VERSION}, using v3.x API")
+    set(CP2K_USE_DFTD4_V3 ON)
+  else()
+    set(CP2K_USE_DFTD4_V3 OFF)
+  endif()
+endif()
+
 # SIRIUS
 if(CP2K_USE_SIRIUS)
-  find_package(sirius REQUIRED)
+  find_package(sirius 7.7.0 REQUIRED)
 endif()
 
 if(CP2K_USE_PLUMED)
@@ -705,6 +847,20 @@ if(CP2K_USE_LIBTORCH)
   if(${CP2K_TORCH_CXX_STANDARD} VERSION_GREATER ${CMAKE_CXX_STANDARD})
     set(CMAKE_CXX_STANDARD ${CP2K_TORCH_CXX_STANDARD})
     message("-- Torch setting CMAKE_CXX_STANDARD to ${CP2K_TORCH_CXX_STANDARD}")
+  endif()
+endif()
+
+if(CP2K_USE_MIMIC)
+  find_package(MiMiC REQUIRED)
+endif()
+
+if(CP2K_USE_OPENPMD)
+  find_package(openPMD 0.16.1 REQUIRED)
+  if(NOT openPMD_HAVE_MPI)
+    message(
+      FATAL_ERROR
+        "Found serial build of openPMD at ${openPMD_DIR}. Provide either an MPI build or deactivate openPMD."
+    )
   endif()
 endif()
 
@@ -728,6 +884,15 @@ if(CP2K_USE_GREENX)
   list(APPEND CP2K_GREENX_LINK_LIBRARIES ${LIB_GXMiniMax})
   get_target_property(LIB_GXAC greenX::LibGXAC LOCATION)
   list(APPEND CP2K_GREENX_LINK_LIBRARIES ${LIB_GXAC})
+  # GreenX with AC requires GMP library
+  find_library(GMP_LIBRARY NAMES gmp REQUIRED)
+  get_filename_component(GMP_LIBRARY_PATH ${GMP_LIBRARY} DIRECTORY)
+  string(APPEND CMAKE_EXE_LINKER_FLAGS " -L${GMP_LIBRARY_PATH}")
+  string(APPEND CMAKE_SHARED_LINKER_FLAGS " -L${GMP_LIBRARY_PATH}")
+
+  add_library(cp2k::greenx INTERFACE IMPORTED)
+  target_link_libraries(cp2k::greenx INTERFACE greenX::GXCommon greenX::LibGXAC
+                                               greenX::LibGXMiniMax)
 endif()
 
 # OPTION HANDLING
@@ -762,37 +927,39 @@ get_target_property(CP2K_LIBS cp2k_link_libs INTERFACE_LINK_LIBRARIES)
 configure_file(cmake/libcp2k.pc.in libcp2k.pc @ONLY)
 
 message(
-  ""
-  "--------------------------------------------------------------------\n"
+  "\n--------------------------------------------------------------------\n"
   "-                                                                  -\n"
   "-               Summary of enabled dependencies                    -\n"
   "-                                                                  -\n"
-  "--------------------------------------------------------------------\n\n")
+  "--------------------------------------------------------------------\n")
 
 message(
-  "  - BLAS AND LAPACK\n"
+  "  - BLAS\n" # keep line break
   "    - vendor: ${CP2K_BLAS_VENDOR}\n"
-  "    - include directories: ${CP2K_BLAS_INCLUDE_DIR} ${LAPACK_INCLUDE_DIR}\n"
-  "    - libraries: ${CP2K_BLAS_LINK_LIBRARIES} ${CP2K_LAPACK_LINK_LIBRARIES}\n\n"
-)
+  "    - include directories: ${CP2K_BLAS_INCLUDE_DIRS}\n"
+  "    - libraries: ${CP2K_BLAS_LINK_LIBRARIES}\n\n")
+
+message("  - LAPACK\n" # keep line break
+        "    - include directories: ${CP2K_LAPACK_INCLUDE_DIRS}\n"
+        "    - libraries: ${CP2K_LAPACK_LINK_LIBRARIES}\n\n")
 
 if(CP2K_USE_MPI)
-  message("  - MPI\n" # let below line separate
-          "    - include directories:  ${MPI_INCLUDE_DIRS}\n"
+  message("  - MPI\n" # keep line break
+          "    - include directories: ${MPI_INCLUDE_DIRS}\n"
           "    - libraries: ${MPI_LIBRARIES}\n\n")
-
   if(CP2K_USE_MPI_F08)
-    message("   - MPI_08:              ON\n")
+    message("  - MPI_F08: ON\n")
   endif()
-
   if(MPI_Fortran_HAVE_F08_MODULE AND NOT CP2K_USE_MPI_F08)
     message(
-      "  - MPI_08 is supposed by MPI but turned off by default.\n"
+      "  - MPI_F08 is supposed by MPI but turned off by default.\n"
       "    To use it add -DCP2K_USE_MPI_F08=ON to the cmake command line\n\n")
   endif()
-
-  message("  - SCALAPACK:\n"
-          "    - libraries: ${CP2K_SCALAPACK_LINK_LIBRARIES}\n\n")
+  message(
+    "  - ScaLAPACK\n" # keep line break
+    "    - vendor: ${CP2K_SCALAPACK_VENDOR}\n"
+    "    - include directories: ${CP2K_SCALAPACK_INCLUDE_DIRS}\n"
+    "    - libraries: ${CP2K_SCALAPACK_LINK_LIBRARIES}\n\n")
 endif()
 
 if((CP2K_USE_ACCEL MATCHES "CUDA") OR (CP2K_USE_ACCEL MATCHES "HIP"))
@@ -814,9 +981,10 @@ if((CP2K_USE_ACCEL MATCHES "CUDA") OR (CP2K_USE_ACCEL MATCHES "HIP"))
 
   message(
     "      - GPU accelerated modules\n"
-    "        - PW     module: ${CP2K_ENABLE_PW_GPU}\n"
+    "        - ELPA   module: ${CP2K_ENABLE_ELPA_GPU}\n"
     "        - GRID   module: ${CP2K_ENABLE_GRID_GPU}\n"
-    "        - DBM    module: ${CP2K_ENABLE_DBM_GPU}\n\n")
+    "        - DBM    module: ${CP2K_ENABLE_DBM_GPU}\n"
+    "        - PW     module: ${CP2K_ENABLE_PW_GPU}\n\n")
 endif()
 
 if(CP2K_USE_CUSOLVER_MP)
@@ -839,8 +1007,13 @@ if(CP2K_USE_LIBXC)
     "    - libraries: ${Libxc_LIBRARIES}\n\n")
 endif()
 
+if(CP2K_USE_SPGLIB)
+  message("  - Spglib\n"
+          "    - include directories: ${CP2K_SPGLIB_INCLUDE_DIRS}\n\n")
+endif()
+
 if(CP2K_USE_LIBTORCH)
-  message("  - LIBTORCH\n" "    - extra CXX flags: ${TORCH_CXX_FLAGS}\n"
+  message("  - LibTorch\n" "    - extra CXX flags: ${TORCH_CXX_FLAGS}\n"
           "    - include directories: ${TORCH_INCLUDE_DIRS}\n"
           "    - libraries: ${TORCH_LIBRARY}\n")
 endif()
@@ -851,6 +1024,10 @@ if(CP2K_USE_HDF5)
     "    - version: ${HDF5_VERSION}\n"
     "    - include directories: ${HDF5_INCLUDE_DIRS}\n"
     "    - libraries: ${HDF5_LIBRARIES}\n\n")
+endif()
+
+if(CP2K_USE_OPENPMD)
+  message("  - openPMD\n" "    - libraries : ${openPMD_DIR}\n\n")
 endif()
 
 if(CP2K_USE_FFTW3)
@@ -874,53 +1051,79 @@ if(CP2K_USE_LIBXSMM)
 endif()
 
 if(CP2K_USE_SPLA)
-  message(" - SPLA\n" # let below line separate
-          "   - include directories: ${SPLA_INCLUDE_DIRS}\n"
-          "   - libraries: ${SPLA_LIBRARIES}\n\n")
+  message(" - SpLA\n" # keep line break
+          "   - include directories: ${CP2K_SPLA_INCLUDE_DIRS}\n"
+          "   - libraries: ${CP2K_SPLA_LINK_LIBRARIES}\n\n")
+endif()
+
+if(CP2K_USE_SPLA_GEMM_OFFLOADING)
+  message(" - SpLA GEMM offloading\n\n")
+endif()
+
+if(CP2K_USE_MIMIC)
+  message(" - MiMiC\n" "   - include directories: ${CP2K_MIMIC_INCLUDE_DIRS}\n"
+          "   - libraries: ${CP2K_MIMIC_LINK_LIBRARIES}\n\n")
 endif()
 
 if(CP2K_USE_DFTD4)
-  message(
-    " - DFTD4\n"
-    "   - include directories: ${CP2K_DFTD4_INCLUDE_DIR}\n"
-    "   - libraries: ${CP2K_DFTD4_LINK_LIBRARIES};${CP2K_DFTD4_LIB_LINK_LIBRARIES}\n\n"
-  )
+  message(" - DFTD4\n" "   - include directories :  ${dftd4_INCLUDE_DIRS}\n"
+          "   - libraries           :  ${dftd4_LINK_LIBRARIES}\n\n")
 endif()
 
 if(CP2K_USE_DEEPMD)
   message(" - DeePMD\n\n")
 endif()
 
+if(CP2K_USE_PEXSI)
+  message(" - PEXSI\n" # keep line break
+          "   - include directories: ${CP2K_PEXSI_INCLUDE_DIRS}\n"
+          "   - libraries: ${CP2K_PEXSI_LINK_LIBRARIES}\n\n")
+endif()
+
+if(CP2K_USE_ACE)
+  message(
+    " - ACE\n" # keep line break
+    "   - include directories: ${CP2K_ACE_INCLUDE_DIRS}\n"
+    "   - libraries: ${CP2K_ACE_LINK_LIBRARIES};${CP2K_ACE_YAML_LINK_LIBRARIES};${CP2K_ACE_CNPY_LINK_LIBRARIES}\n\n"
+  )
+endif()
+
 if(CP2K_USE_LIBSMEAGOL)
-  message(" - LIBSMEAGOL\n"
+  message(" - LibSMEAGOL\n"
           "   - include directories: ${CP2K_LIBSMEAGOL_INCLUDE_DIRS}\n"
           "   - libraries: ${CP2K_LIBSMEAGOL_LINK_LIBRARIES}\n\n")
 endif()
 
+if(CP2K_USE_TBLITE)
+  message(" - TBLITE :\n"
+          "   - include directories :  ${tblite_INCLUDE_DIRS}\n"
+          "   - tblite libraries    :  ${tblite_LINK_LIBRARIES}\n\n")
+endif()
+
 if(CP2K_USE_SIRIUS)
-  message(" - SIRIUS")
+  message(" - SIRIUS\n"
+          "   - include directories: ${CP2K_SIRIUS_INCLUDE_DIRS}\n"
+          "   - libraries: ${CP2K_SIRIUS_LINK_LIBRARIES}\n\n")
 endif()
 
 if(CP2K_USE_COSMA)
-  message(" - COSMA\n" # let below line separate
+  message(" - COSMA\n" # keep line break
           "   - include directories: ${CP2K_COSMA_INCLUDE_DIRS}\n"
           "   - libraries: ${CP2K_COSMA_LINK_LIBRARIES}\n\n")
 endif()
 
 if(CP2K_USE_LIBINT2)
-  message(" - libint2\n"
+  message(" - Libint2\n"
           "   - include directories: ${CP2K_LIBINT2_INCLUDE_DIRS}\n"
           "   - libraries: ${CP2K_LIBINT2_LINK_LIBRARIES}\n\n")
 endif()
 
 if(CP2K_USE_VORI)
-  message(" - libvori\n"
-          "   - include directories: ${CP2K_LIBVORI_INCLUDE_DIRS}\n"
-          "   - libraries: ${CP2K_LIBVORI_LINK_LIBRARIES}\n\n")
+  message(" - Libvori\n" "   - libraries: ${CP2K_LIBVORI_LINK_LIBRARIES}\n\n")
 endif()
 
 if(CP2K_USE_ELPA)
-  message(" - ELPA\n" # let below line separate
+  message(" - ELPA\n" # keep line break
           "   - include directories: ${CP2K_ELPA_INCLUDE_DIRS}\n"
           "   - libraries: ${CP2K_ELPA_LINK_LIBRARIES}\n\n")
 endif()
@@ -931,12 +1134,8 @@ if(CP2K_USE_DLAF)
           "   - libraries: ${CP2K_DLAF_LINK_LIBRARIES}\n\n")
 endif()
 
-if(CP2K_USE_GRPP)
-  message(" - grpp\n")
-endif()
-
 if(CP2K_USE_TREXIO)
-  message(" - trexio\n"
+  message(" - TREXIO\n"
           "   - include directories: ${CP2K_TREXIO_INCLUDE_DIRS}\n"
           "   - libraries: ${CP2K_TREXIO_LINK_LIBRARIES}\n\n")
 endif()
@@ -966,16 +1165,28 @@ if(NOT CP2K_USE_DEEPMD)
   message("   - DeePMD")
 endif()
 
+if(NOT CP2K_USE_PEXSI)
+  message("   - PEXSI")
+endif()
+
+if(NOT CP2K_USE_ACE)
+  message("   - ACE (libpace)")
+endif()
+
+if(NOT CP2K_USE_TBLITE)
+  message("   - TBLITE")
+endif()
+
 if(NOT CP2K_USE_SIRIUS)
   message("   - SIRIUS")
 endif()
 
 if(NOT CP2K_USE_SPGLIB)
-  message("   - SPGLIB")
+  message("   - Spglib")
 endif()
 
 if(NOT CP2K_USE_LIBSMEAGOL)
-  message("   - libSMEAGOL")
+  message("   - LibSMEAGOL")
 endif()
 
 if(NOT CP2K_USE_COSMA)
@@ -983,11 +1194,19 @@ if(NOT CP2K_USE_COSMA)
 endif()
 
 if(NOT CP2K_USE_SPLA)
-  message("   - SPLA")
+  message("   - SpLA")
+endif()
+
+if(NOT CP2K_USE_MIMIC)
+  message("   - MiMiC")
 endif()
 
 if(NOT CP2K_USE_HDF5)
   message("   - HDF5")
+endif()
+
+if(NOT CP2K_USE_OPENPMD)
+  message("   - openPMD")
 endif()
 
 if(${CP2K_USE_ACCEL} MATCHES "NONE")
@@ -1011,15 +1230,15 @@ if(NOT CP2K_USE_LIBXSMM)
 endif()
 
 if(NOT CP2K_USE_LIBINT2)
-  message("   - LIBINT2")
+  message("   - Libint2")
 endif()
 
 if(NOT CP2K_USE_LIBXC)
-  message("   - LIBXC")
+  message("   - LibXC")
 endif()
 
 if(NOT CP2K_USE_VORI)
-  message("   - LIBVORI")
+  message("   - Libvori")
 endif()
 
 if(NOT CP2K_USE_FFTW3)
@@ -1027,27 +1246,22 @@ if(NOT CP2K_USE_FFTW3)
 endif()
 
 if(NOT CP2K_USE_LIBTORCH)
-  message("   - libtorch")
+  message("   - LibTorch")
 endif()
 
 if(NOT CP2K_USE_TREXIO)
-  message("   - trexio")
+  message("   - TREXIO")
 endif()
 
 if(NOT CP2K_USE_GREENX)
-  message("   - greenx")
-endif()
-
-if(NOT CP2K_USE_GRPP)
-  message("   - grpp")
+  message("   - GreenX")
 endif()
 
 message(
   "\n\n" # let below line separate
-  "To run the regtests you need to run the following commands\n"
-  "\n\n cd ..\n" # let below line separate
-  " export CP2K_DATA_DIR=${CMAKE_SOURCE_DIR}/data/\n"
-  " ./tests/do_regtest.py ${cp2k_BINARY_DIR}/bin ${__cp2k_ext}\n\n")
+  "After building and installing CP2K the regtests can be run with the following command:\n"
+  "   ${PROJECT_SOURCE_DIR}/tests/do_regtest.py ${CMAKE_INSTALL_PREFIX}/bin ${__cp2k_ext}\n\n"
+)
 
 # files needed for cmake
 
@@ -1071,3 +1285,20 @@ install(
   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/cp2k"
   FILES_MATCHING
   PATTERN "*.cmake")
+
+# Create symlink: popt -> psmp, sopt -> ssmp
+foreach(__ext_pair "psmp:popt" "ssmp:sopt")
+  string(REPLACE ":" ";" __ext_list ${__ext_pair})
+  list(GET __ext_list 0 __src_ext)
+  list(GET __ext_list 1 __link_ext)
+  if(__cp2k_ext MATCHES ${__src_ext})
+    install(
+      CODE "
+      message(STATUS \"Creating symlink: cp2k.${__link_ext} -> cp2k.${__src_ext}\")
+      execute_process(
+        COMMAND ${CMAKE_COMMAND} -E create_symlink
+          cp2k.${__src_ext}
+          \${CMAKE_INSTALL_PREFIX}/bin/cp2k.${__link_ext})
+    ")
+  endif()
+endforeach()

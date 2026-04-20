@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -110,7 +110,7 @@ CONTAINS
       LOGICAL, INTENT(IN)                                :: calculate_forces
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'calculate_ri_integrals'
-      REAL(KIND=dp), DIMENSION(2), PARAMETER             :: fx = (/0.0_dp, 1.0_dp/)
+      REAL(KIND=dp), DIMENSION(2), PARAMETER             :: fx = [0.0_dp, 1.0_dp]
 
       INTEGER                                            :: handle, i, i1, i2, iatom, ispin, izero, &
                                                             j, j1, j2, jatom, m, n, nbas
@@ -396,7 +396,6 @@ CONTAINS
       ! reassign avec
       avec => lri_env%ri_fit%avec
       bas_ptr => lri_env%ri_fit%bas_ptr
-      ALLOCATE (atom_of_kind(natom), kind_of(natom))
       CALL get_atomic_kind_set(atomic_kind_set, atom_of_kind=atom_of_kind, kind_of=kind_of)
       DO ispin = 1, nspin
          lri_coef => lri_density%lri_coefs(ispin)%lri_kinds

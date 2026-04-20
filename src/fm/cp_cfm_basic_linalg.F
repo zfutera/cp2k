@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -487,7 +487,7 @@ CONTAINS
 
       counter = 0
       DO irow = 1, nrow_local
-         IF (ipivot(irow) .NE. row_indices(irow)) counter = counter + 1
+         IF (ipivot(irow) /= row_indices(irow)) counter = counter + 1
       END DO
 
       IF (MOD(counter, 2) == 0) THEN
@@ -517,7 +517,7 @@ CONTAINS
       counter = 0
       determinant = z_one
       DO irow = 1, nrow_global
-         IF (ipivot(irow) .NE. irow) counter = counter + 1
+         IF (ipivot(irow) /= irow) counter = counter + 1
          determinant = determinant*a(irow, irow)
       END DO
       IF (MOD(counter, 2) == 1) determinant = -1.0_dp*determinant
@@ -700,21 +700,22 @@ CONTAINS
 !>      use cp_fm_set_all to zero (avoids problems with nan)
 ! **************************************************************************************************
    SUBROUTINE cp_cfm_zscale(alpha, matrix_a)
-      COMPLEX(kind=dp), INTENT(in)                       :: alpha
+      COMPLEX(kind=dp), INTENT(IN)                       :: alpha
       TYPE(cp_cfm_type), INTENT(IN)                      :: matrix_a
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'cp_cfm_zscale'
 
       COMPLEX(kind=dp), DIMENSION(:, :), POINTER         :: a
-      INTEGER                                            :: handle
+      INTEGER                                            :: handle, size_a
 
       CALL timeset(routineN, handle)
 
       NULLIFY (a)
 
       a => matrix_a%local_data
+      size_a = SIZE(a, 1)*SIZE(a, 2)
 
-      CALL zscal(SIZE(a), alpha, a(1, 1), 1)
+      CALL zscal(size_a, alpha, a(1, 1), 1)
 
       CALL timestop(handle)
    END SUBROUTINE cp_cfm_zscale
@@ -763,7 +764,7 @@ CONTAINS
 
          counter = 0
          DO irow = 1, nrow_local
-            IF (ipivot(irow) .NE. row_indices(irow)) counter = counter + 1
+            IF (ipivot(irow) /= row_indices(irow)) counter = counter + 1
          END DO
 
          IF (MOD(counter, 2) == 0) THEN
@@ -799,7 +800,7 @@ CONTAINS
          counter = 0
          determinant = z_one
          DO irow = 1, nrow_global
-            IF (ipivot(irow) .NE. irow) counter = counter + 1
+            IF (ipivot(irow) /= irow) counter = counter + 1
             determinant = determinant*a(irow, irow)
          END DO
          IF (MOD(counter, 2) == 1) determinant = -1.0_dp*determinant
@@ -845,7 +846,7 @@ CONTAINS
 
       mat => matrix%local_data
       nrows_global = matrix%matrix_struct%nrow_global
-      CPASSERT(nrows_global .EQ. matrix%matrix_struct%ncol_global)
+      CPASSERT(nrows_global == matrix%matrix_struct%ncol_global)
       ALLOCATE (ipivot(nrows_global))
 
       ! do LU decomposition
@@ -997,7 +998,7 @@ CONTAINS
       uplo = 'U'
       transa = 'N'
       invert = .FALSE.
-      al = CMPLX(1.0_dp, 0.0_dp, dp)
+      al = z_one
       CALL cp_cfm_get_info(matrix_b, nrow_global=m, ncol_global=n)
       IF (PRESENT(side)) side_char = side
       IF (PRESENT(invert_tr)) invert = invert_tr
@@ -1259,7 +1260,7 @@ CONTAINS
       REAL(dp), INTENT(IN)                     :: cs, sn
 
       CHARACTER(len=*), PARAMETER :: routineN = 'cp_cfm_rot_rows'
-      INTEGER                                  :: handle, nrow, ncol
+      INTEGER                                  :: handle, ncol
       COMPLEX(KIND=dp)                         :: sn_cmplx
 
 #if defined(__parallel)
@@ -1267,25 +1268,26 @@ CONTAINS
       INTEGER, DIMENSION(9)                    :: desc
       REAL(dp), DIMENSION(:), ALLOCATABLE      :: work
 #endif
-
       CALL timeset(routineN, handle)
-      CALL cp_cfm_get_info(matrix, nrow_global=nrow, ncol_global=ncol)
+      CALL cp_cfm_get_info(matrix, ncol_global=ncol)
       sn_cmplx = CMPLX(sn, 0.0_dp, dp)
-
 #if defined(__parallel)
-      lwork = 2*ncol + 1
-      ALLOCATE (work(lwork))
-      desc(:) = matrix%matrix_struct%descriptor(:)
-      CALL pzrot(ncol, &
-                 matrix%local_data(1, 1), irow, 1, desc, ncol, &
-                 matrix%local_data(1, 1), jrow, 1, desc, ncol, &
-                 cs, sn_cmplx, work, lwork, info)
-      CPASSERT(info == 0)
-      DEALLOCATE (work)
-#else
-      CALL zrot(ncol, matrix%local_data(irow, 1), ncol, matrix%local_data(jrow, 1), ncol, cs, sn_cmplx)
+      IF (1 /= matrix%matrix_struct%context%n_pid) THEN
+         lwork = 2*ncol + 1
+         ALLOCATE (work(lwork))
+         desc(:) = matrix%matrix_struct%descriptor(:)
+         CALL pzrot(ncol, &
+                    matrix%local_data(1, 1), irow, 1, desc, ncol, &
+                    matrix%local_data(1, 1), jrow, 1, desc, ncol, &
+                    cs, sn_cmplx, work, lwork, info)
+         CPASSERT(info == 0)
+         DEALLOCATE (work)
+      ELSE
 #endif
-
+         CALL zrot(ncol, matrix%local_data(irow, 1), ncol, matrix%local_data(jrow, 1), ncol, cs, sn_cmplx)
+#if defined(__parallel)
+      END IF
+#endif
       CALL timestop(handle)
    END SUBROUTINE cp_cfm_rot_rows
 
@@ -1304,7 +1306,7 @@ CONTAINS
       REAL(dp), INTENT(IN)                     :: cs, sn
 
       CHARACTER(len=*), PARAMETER :: routineN = 'cp_cfm_rot_cols'
-      INTEGER                                  :: handle, nrow, ncol
+      INTEGER                                  :: handle, nrow
       COMPLEX(KIND=dp)                         :: sn_cmplx
 
 #if defined(__parallel)
@@ -1312,25 +1314,26 @@ CONTAINS
       INTEGER, DIMENSION(9)                    :: desc
       REAL(dp), DIMENSION(:), ALLOCATABLE      :: work
 #endif
-
       CALL timeset(routineN, handle)
-      CALL cp_cfm_get_info(matrix, nrow_global=nrow, ncol_global=ncol)
+      CALL cp_cfm_get_info(matrix, nrow_global=nrow)
       sn_cmplx = CMPLX(sn, 0.0_dp, dp)
-
 #if defined(__parallel)
-      lwork = 2*nrow + 1
-      ALLOCATE (work(lwork))
-      desc(:) = matrix%matrix_struct%descriptor(:)
-      CALL pzrot(nrow, &
-                 matrix%local_data(1, 1), 1, icol, desc, 1, &
-                 matrix%local_data(1, 1), 1, jcol, desc, 1, &
-                 cs, sn_cmplx, work, lwork, info)
-      CPASSERT(info == 0)
-      DEALLOCATE (work)
-#else
-      CALL zrot(nrow, matrix%local_data(1, icol), 1, matrix%local_data(1, jcol), 1, cs, sn_cmplx)
+      IF (1 /= matrix%matrix_struct%context%n_pid) THEN
+         lwork = 2*nrow + 1
+         ALLOCATE (work(lwork))
+         desc(:) = matrix%matrix_struct%descriptor(:)
+         CALL pzrot(nrow, &
+                    matrix%local_data(1, 1), 1, icol, desc, 1, &
+                    matrix%local_data(1, 1), 1, jcol, desc, 1, &
+                    cs, sn_cmplx, work, lwork, info)
+         CPASSERT(info == 0)
+         DEALLOCATE (work)
+      ELSE
 #endif
-
+         CALL zrot(nrow, matrix%local_data(1, icol), 1, matrix%local_data(1, jcol), 1, cs, sn_cmplx)
+#if defined(__parallel)
+      END IF
+#endif
       CALL timestop(handle)
    END SUBROUTINE cp_cfm_rot_cols
 

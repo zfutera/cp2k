@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -22,9 +22,6 @@ MODULE rpa_im_time_force_methods
                                               cite_reference
    USE cell_types,                      ONLY: cell_type,&
                                               pbc
-   USE core_ae,                         ONLY: build_core_ae
-   USE core_ppl,                        ONLY: build_core_ppl
-   USE core_ppnl,                       ONLY: build_core_ppnl
    USE cp_blacs_env,                    ONLY: cp_blacs_env_type
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_api,                    ONLY: &
@@ -118,6 +115,8 @@ MODULE rpa_im_time_force_methods
                                               pw_r3d_rs_type
    USE qs_collocate_density,            ONLY: calculate_rho_elec,&
                                               collocate_function
+   USE qs_core_matrices,                ONLY: core_matrices,&
+                                              kinetic_energy_matrix
    USE qs_density_matrices,             ONLY: calculate_whz_matrix
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type,&
@@ -129,7 +128,6 @@ MODULE rpa_im_time_force_methods
                                               integrate_v_rspace
    USE qs_interactions,                 ONLY: init_interaction_radii_orb_basis
    USE qs_kind_types,                   ONLY: qs_kind_type
-   USE qs_kinetic,                      ONLY: build_kinetic_matrix
    USE qs_ks_methods,                   ONLY: calc_rho_tot_gspace
    USE qs_ks_reference,                 ONLY: ks_ref_potential
    USE qs_ks_types,                     ONLY: set_ks_env
@@ -2032,7 +2030,7 @@ CONTAINS
 
             CALL alloc_containers(store_3c(k_mem, i_mem), 1)
 
-            !contract witht KBK^T over the RI index and store
+            !contract with KBK^T over the RI index and store
             CALL dbt_batched_contract_init(t_KBKT)
             CALL dbt_contract(1.0_dp, t_KBKT, t_3c_ints, 0.0_dp, t_3c_work, &
                               contract_1=[2], notcontract_1=[1], &
@@ -2106,6 +2104,7 @@ CONTAINS
 
          CALL dbt_copy(t_M_occ, t_3c_4, move_data=.TRUE.)
 
+         IF (cut_memory > 0) CALL dbt_batched_contract_init(t_KBKT)
          DO j_mem = 1, cut_memory
             jbounds(:, 1) = [starts_array_mc(j_mem), ends_array_mc(j_mem)]
 
@@ -2134,25 +2133,30 @@ CONTAINS
                nze_ddint = nze_ddint + nze
                occ_ddint = occ_ddint + occ
 
+               ! Skip the expensive KBK^T contraction when the intermediate block is empty
+               IF (nze == 0) THEN
+                  CALL dbt_clear(t_3c_5)
+                  CYCLE
+               END IF
+
                CALL dbt_copy(t_3c_5, t_3c_6, move_data=.TRUE.)
                CALL timestop(handle2)
 
                !Calculate the contraction of the above with K*B*K^T
                CALL timeset(routineN//"_3c_KBK", handle2)
-               CALL dbt_batched_contract_init(t_KBKT)
                CALL dbt_contract(1.0_dp, t_KBKT, t_3c_6, 0.0_dp, t_3c_7, &
                                  contract_1=[2], notcontract_1=[1], &
                                  contract_2=[1], notcontract_2=[2, 3], &
                                  map_1=[1], map_2=[2, 3], &
                                  retain_sparsity=.TRUE., flop=flop, unit_nr=unit_nr_dbcsr)
                dbcsr_nflop = dbcsr_nflop + flop
-               CALL dbt_batched_contract_finalize(t_KBKT)
                CALL timestop(handle2)
                CALL dbt_copy(t_3c_7, t_3c_8, summation=.TRUE.)
 
             END DO !k_mem
             CALL dbt_batched_contract_finalize(t_dm_virt)
          END DO !j_mem
+         IF (cut_memory > 0) CALL dbt_batched_contract_finalize(t_KBKT)
 
          CALL dbt_copy(t_3c_8, t_3c_help_1, move_data=.TRUE.)
 
@@ -2935,7 +2939,7 @@ CONTAINS
                         CALL integrate_pgf_product( &
                            la_max=la_max(iset), zeta=zeta(ipgf, iset), la_min=la_min(iset), &
                            lb_max=0, zetb=0.0_dp, lb_min=0, &
-                           ra=ra, rab=(/0.0_dp, 0.0_dp, 0.0_dp/), &
+                           ra=ra, rab=[0.0_dp, 0.0_dp, 0.0_dp], &
                            rsgrid=rs_v(igrid_level), &
                            hab=h_tmp, pab=pab, &
                            o1=o1, &
@@ -3136,18 +3140,17 @@ CONTAINS
 
       INTEGER                                            :: handle, i, idens, ispin, n_rep_hf, nao, &
                                                             nao_aux, nder, nimages, nocc, nspins
-      INTEGER, DIMENSION(:, :, :), POINTER               :: cell_to_index
       LOGICAL                                            :: do_exx, do_hfx, do_tau, do_tau_admm, &
                                                             use_virial
-      REAL(dp)                                           :: dummy_real1, dummy_real2, ehartree, &
-                                                            eps_ppnl, exc, focc
+      REAL(dp)                                           :: dummy_real1, dummy_real2, ehartree, exc, &
+                                                            focc
       REAL(dp), DIMENSION(3, 3)                          :: h_stress, pv_loc
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER :: current_density, current_density_admm, &
          current_mat_h, matrix_p_mp2, matrix_p_mp2_admm, matrix_s, matrix_s_aux_fit, matrix_w, &
          rho_ao, rho_ao_aux, scrm, scrm_admm
-      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: dbcsr_work_h, dbcsr_work_p
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: dbcsr_work_h, dbcsr_work_p, mpa2
       TYPE(dbcsr_type)                                   :: dbcsr_work
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(hfx_type), DIMENSION(:, :), POINTER           :: x_data
@@ -3172,12 +3175,14 @@ CONTAINS
       TYPE(task_list_type), POINTER                      :: task_list_aux_fit
       TYPE(virial_type), POINTER                         :: virial
 
-      NULLIFY (scrm, rho, dft_control, matrix_p_mp2, matrix_s, matrix_p_mp2_admm, admm_env, sab_orb, &
-               cell_to_index, dbcsr_work_p, dbcsr_work_h, sac_ae, sac_ppl, sap_ppnl, force, virial, &
-               qs_kind_set, atomic_kind_set, particle_set, pw_env, poisson_env, auxbas_pw_pool, &
-               task_list_aux_fit, matrix_s_aux_fit, scrm_admm, rho_aux_fit, rho_ao_aux, x_data, &
-               hfx_section, xc_section, para_env, rhoz_g, rhoz_r, tauz_r, v_xc, v_xc_tau, &
-               vxc_rspace, vtau_rspace, vadmm_rspace, rho_ao, matrix_w)
+      NULLIFY (scrm, rho, dft_control, matrix_p_mp2, matrix_s, &
+               matrix_p_mp2_admm, admm_env, sab_orb, dbcsr_work_p, &
+               dbcsr_work_h, sac_ae, sac_ppl, sap_ppnl, force, virial, &
+               qs_kind_set, atomic_kind_set, particle_set, pw_env, poisson_env, &
+               auxbas_pw_pool, task_list_aux_fit, matrix_s_aux_fit, scrm_admm, &
+               rho_aux_fit, rho_ao_aux, x_data, hfx_section, xc_section, &
+               para_env, rhoz_g, rhoz_r, tauz_r, v_xc, v_xc_tau, vxc_rspace, &
+               vtau_rspace, vadmm_rspace, rho_ao, matrix_w)
 
       CALL timeset(routineN, handle)
 
@@ -3202,13 +3207,11 @@ CONTAINS
 
       !The kinetic term (only response density)
       NULLIFY (scrm)
-      IF (nspins == 2) CALL dbcsr_add(matrix_p_mp2(1)%matrix, matrix_p_mp2(2)%matrix, 1.0_dp, 1.0_dp)
-      CALL build_kinetic_matrix(qs_env%ks_env, matrix_t=scrm, &
-                                matrix_name="KINETIC ENERGY MATRIX", &
-                                basis_type="ORB", &
-                                sab_nl=sab_orb, calculate_forces=.TRUE., &
-                                matrix_p=matrix_p_mp2(1)%matrix)
-      IF (nspins == 2) CALL dbcsr_add(matrix_p_mp2(1)%matrix, matrix_p_mp2(2)%matrix, 1.0_dp, -1.0_dp)
+      mpa2(1:nspins, 1:1) => matrix_p_mp2(1:nspins)
+      CALL kinetic_energy_matrix(qs_env, matrix_t=scrm, matrix_p=mpa2, &
+                                 matrix_name="KINETIC ENERGY MATRIX", &
+                                 basis_type="ORB", &
+                                 sab_orb=sab_orb, calculate_forces=.TRUE.)
       CALL dbcsr_deallocate_matrix_set(scrm)
 
       !The pseudo-potential terms (only reponse density)
@@ -3222,34 +3225,14 @@ CONTAINS
 
       nder = 1
       nimages = 1
-      NULLIFY (cell_to_index)
       ALLOCATE (dbcsr_work_p(nspins, 1), dbcsr_work_h(nspins, 1))
       DO ispin = 1, nspins
          dbcsr_work_p(ispin, 1)%matrix => matrix_p_mp2(ispin)%matrix
          dbcsr_work_h(ispin, 1)%matrix => scrm(ispin)%matrix
       END DO
 
-      IF (ASSOCIATED(sac_ae)) THEN
-         CALL build_core_ae(dbcsr_work_h, dbcsr_work_p, force, &
-                            virial, .TRUE., use_virial, nder, &
-                            qs_kind_set, atomic_kind_set, particle_set, &
-                            sab_orb, sac_ae, nimages, cell_to_index)
-      END IF
+      CALL core_matrices(qs_env, dbcsr_work_h, dbcsr_work_p, .TRUE., nder)
 
-      IF (ASSOCIATED(sac_ppl)) THEN
-         CALL build_core_ppl(dbcsr_work_h, dbcsr_work_p, force, &
-                             virial, .TRUE., use_virial, nder, &
-                             qs_kind_set, atomic_kind_set, particle_set, &
-                             sab_orb, sac_ppl, nimages, cell_to_index, "ORB")
-      END IF
-
-      IF (ASSOCIATED(sap_ppnl)) THEN
-         eps_ppnl = dft_control%qs_control%eps_ppnl
-         CALL build_core_ppnl(dbcsr_work_h, dbcsr_work_p, force, &
-                              virial, .TRUE., use_virial, nder, &
-                              qs_kind_set, atomic_kind_set, particle_set, &
-                              sab_orb, sap_ppnl, eps_ppnl, nimages, cell_to_index, "ORB")
-      END IF
       DEALLOCATE (dbcsr_work_p, dbcsr_work_h)
 
       IF (use_virial) THEN

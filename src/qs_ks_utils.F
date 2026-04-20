@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -119,7 +119,7 @@ MODULE qs_ks_utils
    USE task_list_types,                 ONLY: task_list_type
    USE virial_types,                    ONLY: virial_type
    USE xc,                              ONLY: xc_exc_calc,&
-                                              xc_vxc_pw_create1
+                                              xc_vxc_pw_create
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -179,6 +179,7 @@ CONTAINS
       TYPE(pw_pool_type), POINTER                        :: xc_pw_pool
       TYPE(pw_r3d_rs_type)                               :: work_v_rspace
       TYPE(pw_r3d_rs_type), DIMENSION(:), POINTER        :: rho_r, tau, vxc, vxc_tau
+      TYPE(pw_r3d_rs_type), POINTER                      :: weights
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
       TYPE(qs_rho_type), POINTER                         :: rho
       TYPE(section_vals_type), POINTER                   :: hfx_section, input, &
@@ -215,6 +216,7 @@ CONTAINS
                       mos=mo_array, &
                       rho=rho, &
                       pw_env=pw_env, &
+                      xcint_weights=weights, &
                       input=input, &
                       cell=cell, &
                       virial=virial)
@@ -225,6 +227,10 @@ CONTAINS
       xc_section => section_vals_get_subs_vals(input, "DFT%XC")
       hfx_section => section_vals_get_subs_vals(input, "DFT%XC%HF")
 
+      ! No accurate integration possible (as there is no GAPW)
+      IF (ASSOCIATED(weights)) THEN
+         CALL cp_abort(__LOCATION__, "No accurate xc integration possible.")
+      END IF
       ! some assumptions need to be checked
       ! we have two spins
       CPASSERT(SIZE(mo_array, 1) == 2)
@@ -350,12 +356,13 @@ CONTAINS
          ! compute the exchange energies / potential if needed
          IF (just_energy) THEN
             exc = xc_exc_calc(rho_r=rho_r, rho_g=rho_g, tau=tau, xc_section=xc_section, &
-                              pw_pool=xc_pw_pool)
+                              weights=weights, pw_pool=xc_pw_pool)
          ELSE
             CPASSERT(.NOT. compute_virial)
-            CALL xc_vxc_pw_create1(vxc_rho=vxc, rho_r=rho_r, &
-                                   rho_g=rho_g, tau=tau, vxc_tau=vxc_tau, exc=exc, xc_section=xc_section, &
-                                   pw_pool=xc_pw_pool, compute_virial=.FALSE., virial_xc=virial_xc_tmp)
+            CALL xc_vxc_pw_create(vxc_rho=vxc, rho_r=rho_r, &
+                                  rho_g=rho_g, tau=tau, vxc_tau=vxc_tau, exc=exc, xc_section=xc_section, &
+                                  weights=weights, pw_pool=xc_pw_pool, &
+                                  compute_virial=.FALSE., virial_xc=virial_xc_tmp)
          END IF
 
          energy%exc = energy%exc + energy_scaling(iterm)*exc
@@ -494,13 +501,14 @@ CONTAINS
       TYPE(pw_pool_type), POINTER                        :: xc_pw_pool
       TYPE(pw_r3d_rs_type)                               :: work_v_rspace
       TYPE(pw_r3d_rs_type), DIMENSION(:), POINTER        :: rho_r, tau, vxc, vxc_tau
+      TYPE(pw_r3d_rs_type), POINTER                      :: weights
       TYPE(pw_r3d_rs_type), TARGET                       :: orb_rho_r, tmp_r
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
       TYPE(qs_rho_type), POINTER                         :: rho
       TYPE(section_vals_type), POINTER                   :: input, xc_section
       TYPE(virial_type), POINTER                         :: virial
 
-      IF (dft_control%sic_method_id .NE. sic_eo) RETURN
+      IF (dft_control%sic_method_id /= sic_eo) RETURN
 
       CALL timeset(routineN, handle)
 
@@ -512,6 +520,7 @@ CONTAINS
                       mo_derivs=mo_derivs, &
                       mos=mo_array, &
                       rho=rho, &
+                      xcint_weights=weights, &
                       pw_env=pw_env, &
                       input=input, &
                       cell=cell, &
@@ -685,12 +694,13 @@ CONTAINS
 
          IF (just_energy) THEN
             exc = xc_exc_calc(rho_r=rho_r, rho_g=rho_g, tau=tau, xc_section=xc_section, &
-                              pw_pool=xc_pw_pool)
+                              weights=weights, pw_pool=xc_pw_pool)
          ELSE
             CPASSERT(.NOT. compute_virial)
-            CALL xc_vxc_pw_create1(vxc_rho=vxc, rho_r=rho_r, &
-                                   rho_g=rho_g, tau=tau, vxc_tau=vxc_tau, exc=exc, xc_section=xc_section, &
-                                   pw_pool=xc_pw_pool, compute_virial=compute_virial, virial_xc=virial_xc_tmp)
+            CALL xc_vxc_pw_create(vxc_rho=vxc, rho_r=rho_r, &
+                                  rho_g=rho_g, tau=tau, vxc_tau=vxc_tau, exc=exc, xc_section=xc_section, &
+                                  weights=weights, pw_pool=xc_pw_pool, &
+                                  compute_virial=compute_virial, virial_xc=virial_xc_tmp)
             ! add to the existing work_v_rspace
             CALL pw_axpy(vxc(1), work_v_rspace, -dft_control%sic_scaling_b*vxc(1)%pw_grid%dvol)
          END IF
@@ -931,7 +941,9 @@ CONTAINS
             REAL(n_electrons, dp), &
             "Core density on regular grids:", &
             qs_charges%total_rho_core_rspace, &
-            qs_charges%total_rho_core_rspace - REAL(n_electrons + dft_control%charge, dp)
+            qs_charges%total_rho_core_rspace + &
+            qs_charges%total_rho1_hard_nuc - &
+            REAL(n_electrons + dft_control%charge, dp)
       END IF
       IF (dft_control%qs_control%gapw) THEN
          tot1_h = qs_charges%total_rho1_hard(1)
@@ -949,12 +961,28 @@ CONTAINS
                tot_rho_r + tot1_h - tot1_s, &
                "Total charge density (r-space):      ", &
                tot_rho_r + tot1_h - tot1_s &
-               + qs_charges%total_rho_core_rspace, &
-               "Total Rho_soft + Rho0_soft (g-space):", &
-               qs_charges%total_rho_gspace
+               + qs_charges%total_rho_core_rspace &
+               + qs_charges%total_rho1_hard_nuc
+            IF (qs_charges%total_rho1_hard_nuc /= 0.0_dp) THEN
+               WRITE (UNIT=output_unit, FMT="(T3,A,T41,F20.10)") &
+                  "Total CNEO nuc. char. den. (Lebedev): ", &
+                  qs_charges%total_rho1_hard_nuc, &
+                  "Total CNEO soft char. den. (Lebedev): ", &
+                  qs_charges%total_rho1_soft_nuc_lebedev, &
+                  "Total CNEO soft char. den. (r-space): ", &
+                  qs_charges%total_rho1_soft_nuc_rspace, &
+                  "Total soft Rho_e+n+0 (g-space):", &
+                  qs_charges%total_rho_gspace
+            ELSE
+               WRITE (UNIT=output_unit, FMT="(T3,A,T41,F20.10)") &
+                  "Total Rho_soft + Rho0_soft (g-space):", &
+                  qs_charges%total_rho_gspace
+            END IF
          END IF
          qs_charges%background = tot_rho_r + tot1_h - tot1_s + &
-                                 qs_charges%total_rho_core_rspace
+                                 qs_charges%total_rho_core_rspace + &
+                                 qs_charges%total_rho1_hard_nuc
+         ! only add total_rho1_hard_nuc for gapw as cneo requires gapw
       ELSE IF (dft_control%qs_control%gapw_xc) THEN
          tot1_h = qs_charges%total_rho1_hard(1)
          tot1_s = qs_charges%total_rho1_soft(1)
@@ -1036,7 +1064,7 @@ CONTAINS
             END IF
          END IF
          IF (dft_control%do_admm) THEN
-            IF (psolver .EQ. pw_poisson_implicit) THEN
+            IF (psolver == pw_poisson_implicit) THEN
                implicit_ps_ehartree = pw_env%poisson_env%implicit_env%ehartree
                bc = pw_env%poisson_env%parameters%ps_implicit_params%boundary_condition
                SELECT CASE (bc)
@@ -1073,7 +1101,7 @@ CONTAINS
                   "Core Hamiltonian energy:                       ", energy%core, &
                   "Hartree energy:                                ", energy%hartree
             ELSE
-               IF (psolver .EQ. pw_poisson_implicit) THEN
+               IF (psolver == pw_poisson_implicit) THEN
                   implicit_ps_ehartree = pw_env%poisson_env%implicit_env%ehartree
                   bc = pw_env%poisson_env%parameters%ps_implicit_params%boundary_condition
                   SELECT CASE (bc)
@@ -1152,6 +1180,10 @@ CONTAINS
             s2_order_p = dft_control%qs_control%s2_restraint_control%s2_order_p
             WRITE (UNIT=output_unit, FMT="(T3,A,T41,2F20.10)") &
                "S2 restraint (order_p,energy) : ", s2_order_p, energy%s2_restraint
+         END IF
+         IF (energy%core_cneo /= 0.0_dp) THEN
+            WRITE (UNIT=output_unit, FMT="(T3,A,T61,F20.10)") &
+               "CNEO| quantum nuclear core energy: ", energy%core_cneo
          END IF
 
       END IF ! output_unit
@@ -1381,7 +1413,7 @@ CONTAINS
             ! functional derivative of the Hartree energy wrt the density in the presence of dielectric
             ! (vhartree + v_eps); v_eps is nonzero only if the dielectric constant is defind as a function
             ! of the charge density
-            IF (poisson_env%parameters%solver .EQ. pw_poisson_implicit) THEN
+            IF (poisson_env%parameters%solver == pw_poisson_implicit) THEN
                dvol = poisson_env%implicit_env%v_eps%pw_grid%dvol
                CALL pw_axpy(poisson_env%implicit_env%v_eps, v_rspace_new(ispin), dvol)
             END IF
@@ -1476,7 +1508,7 @@ CONTAINS
          CPASSERT(.NOT. dft_control%qs_control%ddapc_restraint_is_spin)
          DO ispin = 1, nspins
             ! extra contribution attributed to the dependency of the dielectric constant to the charge density
-            IF (poisson_env%parameters%solver .EQ. pw_poisson_implicit) THEN
+            IF (poisson_env%parameters%solver == pw_poisson_implicit) THEN
                dvol = poisson_env%implicit_env%v_eps%pw_grid%dvol
                CALL pw_axpy(poisson_env%implicit_env%v_eps, v_rspace, dvol)
             END IF
@@ -1597,7 +1629,7 @@ CONTAINS
 
                ! Add potential to ks_matrix aux_fit, skip integration if no DFT correction
 
-               IF (admm_env%aux_exch_func .NE. do_admm_aux_exch_func_none) THEN
+               IF (admm_env%aux_exch_func /= do_admm_aux_exch_func_none) THEN
 
                   !GPW by default. IF GAPW, then take relevant task list and basis
                   CALL get_admm_env(admm_env, task_list_aux_fit=task_list)
@@ -1818,9 +1850,9 @@ CONTAINS
          embed_corr_local = 0.0_dp
 
          ! Spin embedding potential in open-shell case
-         IF (dft_control%nspins .EQ. 2) THEN
-            IF (ispin .EQ. 1) CALL pw_axpy(qs_env%spin_embed_pot, v_rspace_embed(ispin), 1.0_dp)
-            IF (ispin .EQ. 2) CALL pw_axpy(qs_env%spin_embed_pot, v_rspace_embed(ispin), -1.0_dp)
+         IF (dft_control%nspins == 2) THEN
+            IF (ispin == 1) CALL pw_axpy(qs_env%spin_embed_pot, v_rspace_embed(ispin), 1.0_dp)
+            IF (ispin == 2) CALL pw_axpy(qs_env%spin_embed_pot, v_rspace_embed(ispin), -1.0_dp)
          END IF
          ! Integrate the density*potential
          embed_corr_local = pw_integral_ab(v_rspace_embed(ispin), rho_r(ispin))

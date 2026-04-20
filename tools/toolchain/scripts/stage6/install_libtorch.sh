@@ -8,8 +8,8 @@
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_NAME")/.." && pwd -P)"
 
 # From https://pytorch.org/get-started/locally/
-libtorch_ver="1.12.1"
-libtorch_sha256="82c7be80860f2aa7963f8700004a40af8205e1d721298f2e09b700e766a9d283"
+libtorch_ver="2.7.1"
+libtorch_sha256="63d572598c8d532128a335018913e795c1bbb32602ce378896dc8cfbb5590976"
 
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}"/common_vars.sh
@@ -33,12 +33,7 @@ case "${with_libtorch}" in
     if verify_checksums "${install_lock_file}"; then
       echo "libtorch-${libtorch_ver} is already installed, skipping it."
     else
-      if [ -f ${archive_file} ]; then
-        echo "${archive_file} is found"
-      else
-        download_pkg_from_cp2k_org "${libtorch_sha256}" "${archive_file}"
-      fi
-
+      retrieve_package "${libtorch_sha256}" "${archive_file}"
       echo "Installing from scratch into ${pkg_install_dir}"
       [ -d libtorch ] && rm -rf libtorch
       [ -d ${pkg_install_dir} ] && rm -rf ${pkg_install_dir}
@@ -89,23 +84,13 @@ prepend_path PKG_CONFIG_PATH "${pkg_install_dir}/lib/pkgconfig"
 prepend_path CMAKE_PREFIX_PATH "${pkg_install_dir}"
 EOF
   fi
-  if [ "$ENABLE_CUDA" = "__TRUE__" ]; then
-    cat << EOF >> "${BUILDDIR}/setup_libtorch"
+  cat << EOF >> "${BUILDDIR}/setup_libtorch"
 export CP_DFLAGS="\${CP_DFLAGS} -D__LIBTORCH"
 export CXXFLAGS="\${CXXFLAGS} ${LIBTORCH_CXXFLAGS}"
 export CP_LDFLAGS="\${CP_LDFLAGS} ${LIBTORCH_LDFLAGS}"
 export CP_LIBS="\${CP_LIBS} -lc10 -ltorch_cpu -ltorch"
 EOF
-    cat "${BUILDDIR}/setup_libtorch" >> "${SETUPFILE}"
-  else
-    cat << EOF >> "${BUILDDIR}/setup_libtorch"
-export CP_DFLAGS="\${CP_DFLAGS} -D__LIBTORCH"
-export CXXFLAGS="\${CXXFLAGS} ${LIBTORCH_CXXFLAGS}"
-export CP_LDFLAGS="\${CP_LDFLAGS} ${LIBTORCH_LDFLAGS}"
-export CP_LIBS="\${CP_LIBS} -lc10 -ltorch_cpu -ltorch"
-EOF
-    cat "${BUILDDIR}/setup_libtorch" >> "${SETUPFILE}"
-  fi
+  filter_setup "${BUILDDIR}/setup_libtorch" "${SETUPFILE}"
 fi
 
 load "${BUILDDIR}/setup_libtorch"

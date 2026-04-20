@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -28,7 +28,7 @@ MODULE scf_control_types
         outer_scf_optimizer_broyden, outer_scf_optimizer_diis, outer_scf_optimizer_newton, &
         outer_scf_optimizer_newton_ls, outer_scf_optimizer_none, outer_scf_optimizer_sd, &
         outer_scf_optimizer_secant, outer_scf_s2_constraint, smear_energy_window, &
-        smear_fermi_dirac, smear_list
+        smear_fermi_dirac, smear_gaussian, smear_list, smear_mp, smear_mv
    USE input_cp2k_scf,                  ONLY: create_scf_section
    USE input_enumeration_types,         ONLY: enum_i2c,&
                                               enumeration_type
@@ -95,7 +95,8 @@ MODULE scf_control_types
       REAL(KIND=dp)                         :: electronic_temperature = -1.0_dp, &
                                                fixed_mag_mom = -1.0_dp, &
                                                eps_fermi_dirac = -1.0_dp, &
-                                               window_size = -1.0_dp
+                                               window_size = -1.0_dp, &
+                                               smearing_width = -1.0_dp
       REAL(KIND=dp), DIMENSION(:), POINTER  :: list => NULL()
    END TYPE smear_type
 
@@ -318,7 +319,7 @@ CONTAINS
 
       INTEGER                                            :: cholesky_flag, handle, ialgo
       INTEGER, DIMENSION(:), POINTER                     :: added_mos
-      LOGICAL                                            :: do_mixing
+      LOGICAL                                            :: do_mixing, explicit
       REAL(KIND=dp), DIMENSION(:), POINTER               :: roks_parameter
       TYPE(section_vals_type), POINTER                   :: mixing_section, outer_scf_section, &
                                                             scf_section, smear_section
@@ -341,11 +342,20 @@ CONTAINS
          scf_control%use_diag = .TRUE.
       END IF
       CALL section_vals_val_get(scf_section, "OT%ALGORITHM", i_val=ialgo)
-      scf_control%do_outer_scf_reortho = ialgo .EQ. ot_algo_taylor_or_diag
+      scf_control%do_outer_scf_reortho = ialgo == ot_algo_taylor_or_diag
       CALL section_vals_val_get(scf_section, "SCF_GUESS", i_val=scf_control%density_guess)
-      CALL section_vals_val_get(scf_section, "EPS_DIIS", r_val=scf_control%eps_diis)
       CALL section_vals_val_get(scf_section, "eps_eigval", r_val=scf_control%eps_eigval)
       CALL section_vals_val_get(scf_section, "cholesky", i_val=cholesky_flag)
+      IF (scf_control%use_ot) THEN
+         ! eps_diis default is 0 for OT
+         scf_control%eps_diis = 0.0_dp
+         CALL section_vals_val_get(scf_section, "EPS_DIIS", explicit=explicit)
+         IF (explicit) THEN
+            CALL section_vals_val_get(scf_section, "EPS_DIIS", r_val=scf_control%eps_diis)
+         END IF
+      ELSE
+         CALL section_vals_val_get(scf_section, "EPS_DIIS", r_val=scf_control%eps_diis)
+      END IF
       IF (cholesky_flag > 0) THEN
          scf_control%use_cholesky = .TRUE.
       END IF
@@ -483,6 +493,7 @@ CONTAINS
       smear%eps_fermi_dirac = 1.0E-5_dp
       smear%fixed_mag_mom = -100.0_dp
       smear%window_size = 0.0_dp
+      smear%smearing_width = 0.0_dp
       NULLIFY (smear%list)
    END SUBROUTINE init_smear
 
@@ -510,6 +521,12 @@ CONTAINS
                                    r_val=smear%eps_fermi_dirac)
          CALL section_vals_val_get(smear_section, "WINDOW_SIZE", &
                                    r_val=smear%window_size)
+         IF (smear%method == smear_gaussian .OR. &
+             smear%method == smear_mp .OR. &
+             smear%method == smear_mv) THEN
+            CALL section_vals_val_get(smear_section, "SIGMA", &
+                                      r_val=smear%smearing_width)
+         END IF
          IF (smear%method == smear_list) THEN
             CALL section_vals_val_get(smear_section, "LIST", &
                                       r_vals=r_vals)
@@ -622,6 +639,13 @@ CONTAINS
                      "Electronic temperature [a.u.]:", scf_control%smear%electronic_temperature, &
                      "Accuracy threshold:", scf_control%smear%eps_fermi_dirac
                   IF (scf_control%smear%fixed_mag_mom > 0.0_dp) WRITE (UNIT=output_unit, FMT="(T25,A,T61,F20.1)") &
+                     "Fixed magnetic moment set to:", scf_control%smear%fixed_mag_mom
+               CASE (smear_gaussian, smear_mp, smear_mv)
+                  WRITE (UNIT=output_unit, FMT="(T25,A,T71,ES10.2)") &
+                     "Smearing width (sigma) [a.u.]:", scf_control%smear%smearing_width, &
+                     "Accuracy threshold:", scf_control%smear%eps_fermi_dirac
+                  IF (scf_control%smear%fixed_mag_mom > 0.0_dp) &
+                     WRITE (UNIT=output_unit, FMT="(T25,A,T61,F20.1)") &
                      "Fixed magnetic moment set to:", scf_control%smear%fixed_mag_mom
                CASE (smear_energy_window)
                   WRITE (UNIT=output_unit, FMT="(T25,A,T71,F10.6)") &

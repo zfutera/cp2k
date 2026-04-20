@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -31,7 +31,10 @@ MODULE eeq_method
                                               cp_fm_release,&
                                               cp_fm_set_all,&
                                               cp_fm_type
-   USE cp_log_handling,                 ONLY: cp_logger_get_default_unit_nr
+   USE cp_log_handling,                 ONLY: cp_get_default_logger,&
+                                              cp_logger_get_default_unit_nr,&
+                                              cp_logger_type
+   USE cp_output_handling,              ONLY: medium_print_level
    USE distribution_1d_types,           ONLY: distribution_1d_type
    USE distribution_2d_types,           ONLY: distribution_2d_type
    USE eeq_data,                        ONLY: get_eeq_data
@@ -185,13 +188,17 @@ CONTAINS
 !> \param eeq_sparam ...
 !> \param eeq_model ...
 !> \param enshift_type ...
+!> \param exclude ...
+!> \param cn_max ...
 ! **************************************************************************************************
-   SUBROUTINE eeq_charges(qs_env, charges, eeq_sparam, eeq_model, enshift_type)
+   SUBROUTINE eeq_charges(qs_env, charges, eeq_sparam, eeq_model, enshift_type, exclude, cn_max)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       REAL(KIND=dp), DIMENSION(:), INTENT(INOUT)         :: charges
       TYPE(eeq_solver_type), INTENT(IN)                  :: eeq_sparam
       INTEGER, INTENT(IN)                                :: eeq_model, enshift_type
+      LOGICAL, DIMENSION(:), INTENT(IN), OPTIONAL        :: exclude
+      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: cn_max
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'eeq_charges'
 
@@ -207,6 +214,7 @@ CONTAINS
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cell_type), POINTER                           :: cell, cell_ref
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dcnum_type), ALLOCATABLE, DIMENSION(:)        :: dcnum
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(ewald_environment_type), POINTER              :: ewald_env
@@ -219,8 +227,6 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      iunit = cp_logger_get_default_unit_nr()
-
       CALL get_qs_env(qs_env, &
                       qs_kind_set=qs_kind_set, &
                       atomic_kind_set=atomic_kind_set, &
@@ -231,9 +237,23 @@ CONTAINS
                       dft_control=dft_control)
       CALL get_qs_env(qs_env, nkind=nkind, natom=natom)
 
+      logger => cp_get_default_logger()
+      IF (para_env%is_source() .AND. logger%iter_info%print_level >= medium_print_level) THEN
+         iunit = cp_logger_get_default_unit_nr()
+      ELSE
+         iunit = -1
+      END IF
+
       totalcharge = dft_control%charge
 
       CALL get_cnumbers(qs_env, cnumbers, dcnum, .FALSE.)
+
+      ! Apply smooth logistic CN cutoff to match multicharge/D4 behavior
+      IF (PRESENT(cn_max)) THEN
+         DO iatom = 1, natom
+            cnumbers(iatom) = LOG(1.0_dp + EXP(cn_max)) - LOG(1.0_dp + EXP(cn_max - cnumbers(iatom)))
+         END DO
+      END IF
 
       ! gamma[a,b]
       ALLOCATE (gab(nkind, nkind), gam(nkind))
@@ -250,6 +270,18 @@ CONTAINS
             !
          END DO
       END DO
+
+      ! Override parameters for excluded kinds (ghost/floating atoms in BSSE):
+      ! huge hardness + zero coupling -> q = 0, no influence on other atoms.
+      IF (PRESENT(exclude)) THEN
+         DO ikind = 1, nkind
+            IF (exclude(ikind)) THEN
+               gam(ikind) = 1.0e30_dp
+               gab(ikind, :) = 0.0_dp
+               gab(:, ikind) = 0.0_dp
+            END IF
+         END DO
+      END IF
 
       ! Chi[a,a]
       sgamma = 8.0_dp ! see D4 for periodic systems paper
@@ -271,6 +303,14 @@ CONTAINS
          chia(iatom) = xi - kappa*scn
          !
       END DO
+
+      ! Zero electronegativity for excluded atoms (ghost/floating in BSSE)
+      IF (PRESENT(exclude)) THEN
+         DO iatom = 1, natom
+            ikind = kind_of(iatom)
+            IF (exclude(ikind)) chia(iatom) = 0.0_dp
+         END DO
+      END IF
 
       ! efield
       IF (dft_control%apply_period_efield .OR. dft_control%apply_efield .OR. &
@@ -332,9 +372,11 @@ CONTAINS
 !> \param eeq_model ...
 !> \param enshift_type ...
 !> \param response_only ...
+!> \param exclude ...
+!> \param cn_max ...
 ! **************************************************************************************************
    SUBROUTINE eeq_forces(qs_env, charges, dcharges, gradient, stress, &
-                         eeq_sparam, eeq_model, enshift_type, response_only)
+                         eeq_sparam, eeq_model, enshift_type, response_only, exclude, cn_max)
 
       TYPE(qs_environment_type), POINTER                 :: qs_env
       REAL(KIND=dp), DIMENSION(:), INTENT(IN)            :: charges, dcharges
@@ -343,6 +385,8 @@ CONTAINS
       TYPE(eeq_solver_type), INTENT(IN)                  :: eeq_sparam
       INTEGER, INTENT(IN)                                :: eeq_model, enshift_type
       LOGICAL, INTENT(IN)                                :: response_only
+      LOGICAL, DIMENSION(:), INTENT(IN), OPTIONAL        :: exclude
+      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: cn_max
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'eeq_forces'
 
@@ -353,10 +397,8 @@ CONTAINS
       INTEGER, DIMENSION(3)                              :: periodic
       LOGICAL                                            :: do_ewald, use_virial
       LOGICAL, ALLOCATABLE, DIMENSION(:)                 :: default_present
-      REAL(KIND=dp)                                      :: ala, alb, alpha, cn, ctot, dr, dr2, drk, &
-                                                            elag, esg, fe, gam2, gama, grc, kappa, &
-                                                            qlam, qq, qq1, qq2, rcut, scn, sgamma, &
-                                                            subcells, totalcharge, xi
+      REAL(KIND=dp) :: ala, alb, alpha, cn, ctot, dcnpdcn, dr, dr2, drk, elag, esg, fe, gam2, &
+         gama, grc, kappa, qlam, qq, qq1, qq2, rcut, scn, sgamma, subcells, totalcharge, xi
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: c_radius, cnumbers, gam, qlag
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: epforce, gab, pair_radius
       REAL(KIND=dp), DIMENSION(3)                        :: fdik, ri, rij, rik, rj
@@ -366,6 +408,7 @@ CONTAINS
       TYPE(atprop_type), POINTER                         :: atprop
       TYPE(cell_type), POINTER                           :: cell, cell_ref
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
+      TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dcnum_type), ALLOCATABLE, DIMENSION(:)        :: dcnum
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(distribution_1d_type), POINTER                :: distribution_1d, local_particles
@@ -388,8 +431,6 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      iunit = cp_logger_get_default_unit_nr()
-
       CALL get_qs_env(qs_env, &
                       qs_kind_set=qs_kind_set, &
                       atomic_kind_set=atomic_kind_set, &
@@ -401,6 +442,14 @@ CONTAINS
                       virial=virial, &
                       atprop=atprop, &
                       dft_control=dft_control)
+
+      logger => cp_get_default_logger()
+      IF (para_env%is_source() .AND. logger%iter_info%print_level >= medium_print_level) THEN
+         iunit = cp_logger_get_default_unit_nr()
+      ELSE
+         iunit = -1
+      END IF
+
       CALL get_qs_env(qs_env, nkind=nkind, natom=natom)
       use_virial = virial%pv_availability .AND. (.NOT. virial%pv_numer)
 
@@ -409,6 +458,18 @@ CONTAINS
       totalcharge = dft_control%charge
 
       CALL get_cnumbers(qs_env, cnumbers, dcnum, .TRUE.)
+
+      ! Apply smooth logistic CN cutoff to match multicharge/D4 behavior
+      ! Chain rule: dcn_cut/dR = (dcn_cut/dcn) * (dcn/dR)
+      IF (PRESENT(cn_max)) THEN
+         DO iatom = 1, natom
+            dcnpdcn = EXP(cn_max)/(EXP(cn_max) + EXP(cnumbers(iatom)))
+            cnumbers(iatom) = LOG(1.0_dp + EXP(cn_max)) - LOG(1.0_dp + EXP(cn_max - cnumbers(iatom)))
+            DO i = 1, dcnum(iatom)%neighbors
+               dcnum(iatom)%dvals(i) = dcnum(iatom)%dvals(i)*dcnpdcn
+            END DO
+         END DO
+      END IF
 
       ! gamma[a,b]
       ALLOCATE (gab(nkind, nkind), gam(nkind))
@@ -425,6 +486,17 @@ CONTAINS
             !
          END DO
       END DO
+
+      ! Override parameters for excluded kinds (ghost/floating atoms in BSSE)
+      IF (PRESENT(exclude)) THEN
+         DO ikind = 1, nkind
+            IF (exclude(ikind)) THEN
+               gam(ikind) = 1.0e30_dp
+               gab(ikind, :) = 0.0_dp
+               gab(:, ikind) = 0.0_dp
+            END IF
+         END DO
+      END IF
 
       ALLOCATE (qlag(natom))
 
@@ -771,7 +843,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER                        :: routineN = 'eeq_solver'
 
       INTEGER                                            :: handle, ierror, iunit, natom, nkind, ns
-      LOGICAL                                            :: do_direct, do_ewald, do_sparse
+      LOGICAL                                            :: do_direct, do_displ, do_ewald, do_sparse
       REAL(KIND=dp)                                      :: alpha, deth, ftime, qtot
       TYPE(cp_fm_struct_type), POINTER                   :: mat_struct
       TYPE(cp_fm_type)                                   :: eeq_mat
@@ -791,6 +863,11 @@ CONTAINS
       do_direct = eeq_sparam%direct
       do_sparse = eeq_sparam%sparse
 
+      do_displ = .FALSE.
+      IF (dft_control%apply_period_efield .AND. ASSOCIATED(dft_control%period_efield)) THEN
+         do_displ = dft_control%period_efield%displacement_field
+      END IF
+
       ! sparse option NYA
       IF (do_sparse) THEN
          CALL cp_abort(__LOCATION__, "EEQ: Sparse option not yet available")
@@ -808,7 +885,7 @@ CONTAINS
          CPASSERT(PRESENT(ewald_env))
          CPASSERT(PRESENT(ewald_pw))
          IF (do_direct) THEN
-            IF (dft_control%apply_period_efield .AND. dft_control%period_efield%displacement_field) THEN
+            IF (do_displ) THEN
                CPABORT("NYA")
             ELSE
                CALL fpbc_solver(charges, lambda, eeq_energy, eeq_mat, particle_set, &
@@ -816,7 +893,7 @@ CONTAINS
                                 ewald_env, ewald_pw, iounit)
             END IF
          ELSE
-            IF (dft_control%apply_period_efield .AND. dft_control%period_efield%displacement_field) THEN
+            IF (do_displ) THEN
                CPABORT("NYA")
             ELSE
                ierror = 0

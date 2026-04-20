@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -563,7 +563,7 @@ CONTAINS
          END DO
       END DO
 
-   END SUBROUTINE
+   END SUBROUTINE a_mat_to_cp2k
 ! ***************************************************************************
 !> \brief adjust the unit of C MAT for piglet
 !> \param c_mat ...

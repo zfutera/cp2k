@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -53,7 +53,7 @@ MODULE kpoint_coulomb_2c
 
    TYPE two_d_util_type
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)  :: block
-   END TYPE
+   END TYPE two_d_util_type
 
 CONTAINS
 
@@ -179,10 +179,14 @@ CONTAINS
                                               qs_kind_set, atomic_kind_set, basis_type, cell, &
                                               operator_type)
 
+!$OMP PARALLEL DO DEFAULT(NONE) &
+!$OMP             SHARED(blocks_v_L, blocks_v_L_store) &
+!$OMP             PRIVATE(i_block)
                         DO i_block = 1, SIZE(blocks_v_L)
                            blocks_v_L_store(i_block)%block(:, :) = blocks_v_L_store(i_block)%block(:, :) &
                                                                    + blocks_v_L(i_block)%block(:, :)
                         END DO
+!$OMP END PARALLEL DO
 
                      END DO
                   END DO
@@ -391,7 +395,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE deallocate_blocks_v_kp
 
 ! **************************************************************************************************
 !> \brief ...
@@ -414,7 +418,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE deallocate_blocks_v_L
 
 ! **************************************************************************************************
 !> \brief ...
@@ -468,7 +472,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE allocate_blocks_v_L
 
 ! **************************************************************************************************
 !> \brief ...
@@ -536,7 +540,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE allocate_blocks_v_kp
 
 ! **************************************************************************************************
 !> \brief ...
@@ -627,7 +631,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE get_factor_and_xyz_min_max
 
 ! **************************************************************************************************
 !> \brief ...
@@ -657,7 +661,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE allocate_tmp
 
 ! **************************************************************************************************
 !> \brief ...
@@ -677,7 +681,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE deallocate_tmp
 
 ! **************************************************************************************************
 !> \brief ...
@@ -754,7 +758,7 @@ CONTAINS
 
                         vec_s = [REAL(i_x, dp), REAL(j_y, dp), REAL(k_z, dp)]
 
-                        IF (MODULO(i_cell, para_env%num_pe) .NE. para_env%mepos) CYCLE
+                        IF (MODULO(i_cell, para_env%num_pe) /= para_env%mepos) CYCLE
 
                         vec_L = MATMUL(hmat, vec_s)
 
@@ -776,7 +780,7 @@ CONTAINS
                ! add exp(iq*vec_L) * (P 0 | Q vec_L) to V_PQ(q)
                DO ik = 1, ikp_end
 
-                  IF (MODULO(ik, para_env%num_pe) .NE. para_env%mepos) CYCLE
+                  IF (MODULO(ik, para_env%num_pe) /= para_env%mepos) CYCLE
 
                   ikp_local = ikp_local + 1
 

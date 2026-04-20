@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -17,6 +17,7 @@ MODULE qs_mixing_utils
    USE cp_dbcsr_operations,             ONLY: dbcsr_allocate_matrix_set
    USE distribution_1d_types,           ONLY: distribution_1d_type
    USE kinds,                           ONLY: dp
+   USE mathconstants,                   ONLY: z_zero
    USE message_passing,                 ONLY: mp_para_env_type
    USE pw_types,                        ONLY: pw_c1d_gs_type
    USE qs_density_mixing_types,         ONLY: broyden_mixing_nr,&
@@ -435,17 +436,27 @@ CONTAINS
       IF (.NOT. ASSOCIATED(mixing_store%kerker_factor)) THEN
          ALLOCATE (mixing_store%kerker_factor(ng))
       END IF
+      IF (.NOT. ASSOCIATED(mixing_store%kerker_factor_mag)) THEN
+         ALLOCATE (mixing_store%kerker_factor_mag(ng))
+      END IF
       IF (.NOT. ASSOCIATED(mixing_store%special_metric)) THEN
          ALLOCATE (mixing_store%special_metric(ng))
       END IF
       beta = mixing_store%beta
       kmin = 0.1_dp
       mixing_store%kerker_factor = 1.0_dp
+      mixing_store%kerker_factor_mag = 1.0_dp
       mixing_store%special_metric = 1.0_dp
       ig1 = 1
       IF (rho_g(1)%pw_grid%have_g0) ig1 = 2
       DO ig = ig1, mixing_store%ig_max
          mixing_store%kerker_factor(ig) = MAX(g2(ig)/(g2(ig) + beta*beta), kmin)
+         IF (mixing_store%beta_mag > 1.0E-10_dp) THEN
+            mixing_store%kerker_factor_mag(ig) = MAX(g2(ig)/(g2(ig) + mixing_store%beta_mag*mixing_store%beta_mag), kmin)
+         ELSE
+            ! beta_mag ~ 0 means no Kerker screening on the magnetization channel
+            mixing_store%kerker_factor_mag(ig) = 1.0_dp
+         END IF
          mixing_store%special_metric(ig) = &
             1.0_dp + 50.0_dp/8.0_dp*( &
             1.0_dp + COS(g_vec(1, ig)) + COS(g_vec(2, ig)) + COS(g_vec(3, ig)) + &
@@ -550,10 +561,10 @@ CONTAINS
                ALLOCATE (mixing_store%last_res(ispin)%cc(ng))
             END IF
             DO ib = 1, nbuffer
-               mixing_store%drho_buffer(ib, ispin)%cc = CMPLX(0.0_dp, 0.0_dp, kind=dp)
+               mixing_store%drho_buffer(ib, ispin)%cc = z_zero
             END DO
-            mixing_store%last_res(ispin)%cc = CMPLX(0.0_dp, 0.0_dp, kind=dp)
-            mixing_store%rhoin_old(ispin)%cc = CMPLX(0.0_dp, 0.0_dp, kind=dp)
+            mixing_store%last_res(ispin)%cc = z_zero
+            mixing_store%rhoin_old(ispin)%cc = z_zero
          END DO
          IF (mixing_store%gmix_p) THEN
             IF (PRESENT(rho_atom)) THEN

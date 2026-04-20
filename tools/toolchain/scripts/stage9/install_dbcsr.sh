@@ -6,8 +6,8 @@
 [ "${BASH_SOURCE[0]}" ] && SCRIPT_NAME="${BASH_SOURCE[0]}" || SCRIPT_NAME=$0
 SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_NAME}")/.." && pwd -P)"
 
-dbcsr_ver="2.8.0"
-dbcsr_sha256="d55e4f052f28d1ed0faeaa07557241439243287a184d1fd27f875c8b9ca6bd96"
+dbcsr_ver="2.9.1"
+dbcsr_sha256="fa5a4aeba0a07761511af2c26c779bd811b5ea0ef06a5d94535b6dd7b2e0ce59"
 source "${SCRIPT_DIR}"/common_vars.sh
 source "${SCRIPT_DIR}"/tool_kit.sh
 source "${SCRIPT_DIR}"/signal_trap.sh
@@ -27,12 +27,7 @@ case "${with_dbcsr}" in
     if verify_checksums "${install_lock_file}"; then
       echo "dbcsr-${dbcsr_ver} is already installed, skipping it."
     else
-      if [ -f dbcsr-${dbcsr_ver}.tar.gz ]; then
-        echo "dbcsr-${dbcsr_ver}.tar.gz is found"
-      else
-        download_pkg_from_urlpath "${dbcsr_sha256}" "dbcsr-${dbcsr_ver}.tar.gz" \
-          https://github.com/cp2k/dbcsr/releases/download/v${dbcsr_ver}
-      fi
+      retrieve_package "${dbcsr_sha256}" "dbcsr-${dbcsr_ver}.tar.gz"
       echo "Installing from scratch into ${pkg_install_dir}"
       [ -d dbcsr-${dbcsr_ver} ] && rm -rf dbcsr-${dbcsr_ver}
       tar -xzf dbcsr-${dbcsr_ver}.tar.gz
@@ -40,18 +35,26 @@ case "${with_dbcsr}" in
       mkdir build-cpu
       cd build-cpu
       CMAKE_OPTIONS="-DBUILD_TESTING=NO -DCMAKE_INSTALL_LIBDIR=lib -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_VERBOSE_MAKEFILE=ON"
-      CMAKE_OPTIONS="${CMAKE_OPTIONS} -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DUSE_OPENMP=ON -DUSE_SMM=blas -DWITH_EXAMPLES=NO"
+      CMAKE_OPTIONS="${CMAKE_OPTIONS} -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DUSE_OPENMP=ON -DWITH_EXAMPLES=NO"
+      if [ "${with_libxsmm}" == "__DONTUSE__" ]; then
+        CMAKE_OPTIONS="${CMAKE_OPTIONS} -DUSE_SMM=blas"
+      else
+        CMAKE_OPTIONS="${CMAKE_OPTIONS} -DUSE_SMM=libxsmm"
+      fi
       if [ "${MPI_MODE}" == "no" ]; then
         CMAKE_OPTIONS="${CMAKE_OPTIONS} -DUSE_MPI=OFF"
       else
         CMAKE_OPTIONS="${CMAKE_OPTIONS} -DUSE_MPI=ON"
+        if [ -n "$(grep "MPI_F08" "${INSTALLDIR}"/toolchain.env)" ]; then
+          CMAKE_OPTIONS="${CMAKE_OPTIONS} -DUSE_MPI_F08=ON"
+        fi
       fi
       cmake \
         -DCMAKE_INSTALL_PREFIX=${pkg_install_dir} \
         ${CMAKE_OPTIONS} .. \
-        > cmake.log 2>&1 || tail -n ${LOG_LINES} cmake.log
-      make -j $(get_nprocs) > make.log 2>&1 || tail -n ${LOG_LINES} make.log
-      make -j $(get_nprocs) install > install.log 2>&1 || tail -n ${LOG_LINES} install.log
+        > cmake.log 2>&1 || tail_excerpt cmake.log
+      make -j $(get_nprocs) > make.log 2>&1 || tail_excerpt make.log
+      make -j $(get_nprocs) install > install.log 2>&1 || tail_excerpt install.log
       cd ..
       if [ "${ENABLE_CUDA}" == "__TRUE__" ]; then
         mkdir build-cuda
@@ -60,9 +63,9 @@ case "${with_dbcsr}" in
         cmake \
           -DCMAKE_INSTALL_PREFIX=${pkg_install_dir}-cuda \
           ${CMAKE_OPTIONS} .. \
-          > cmake.log 2>&1 || tail -n ${LOG_LINES} cmake.log
-        make -j $(get_nprocs) > make.log 2>&1 || tail -n ${LOG_LINES} make.log
-        make -j $(get_nprocs) install > install.log 2>&1 || tail -n ${LOG_LINES} install.log
+          > cmake.log 2>&1 || tail_excerpt cmake.log
+        make -j $(get_nprocs) > make.log 2>&1 || tail_excerpt make.log
+        make -j $(get_nprocs) install > install.log 2>&1 || tail_excerpt install.log
         cd ..
       fi
       if [ "${ENABLE_HIP}" == "__TRUE__" ]; then
@@ -72,9 +75,9 @@ case "${with_dbcsr}" in
         cmake \
           -DCMAKE_INSTALL_PREFIX=${pkg_install_dir}-hip \
           ${CMAKE_OPTIONS} .. \
-          > cmake.log 2>&1 || tail -n ${LOG_LINES} cmake.log
-        make -j $(get_nprocs) > make.log 2>&1 || tail -n ${LOG_LINES} make.log
-        make -j $(get_nprocs) install > install.log 2>&1 || tail -n ${LOG_LINES} install.log
+          > cmake.log 2>&1 || tail_excerpt cmake.log
+        make -j $(get_nprocs) > make.log 2>&1 || tail_excerpt make.log
+        make -j $(get_nprocs) install > install.log 2>&1 || tail_excerpt install.log
         cd ..
       fi
       write_checksums "${install_lock_file}" "${SCRIPT_DIR}/stage9/$(basename ${SCRIPT_NAME})"
@@ -124,7 +127,7 @@ prepend_path LD_LIBRARY_PATH "${pkg_install_dir1}/lib"
 prepend_path LD_RUN_PATH "${pkg_install_dir1}/lib"
 prepend_path LIBRARY_PATH "${pkg_install_dir1}/lib"
 prepend_path CPATH "${pkg_install_dir1}/include"
-prepend_path CMAKE_INSTALL_PREFIX "${pkg_install_dir1}"
+prepend_path CMAKE_PREFIX_PATH "${pkg_install_dir1}"
 export DBCSR_ROOT="${pkg_install_dir}"
 export DBCSR_HIP_ROOT="${pkg_install_dir}-hip"
 export DBCSR_CUDA_ROOT="${pkg_install_dir}-cuda"
@@ -142,7 +145,7 @@ else
   touch "${BUILDDIR}/setup_dbcsr"
 fi
 
-cat "${BUILDDIR}/setup_dbcsr" >> ${SETUPFILE}
+filter_setup "${BUILDDIR}/setup_dbcsr" "${SETUPFILE}"
 
 load "${BUILDDIR}/setup_dbcsr"
 write_toolchain_env "${INSTALLDIR}"

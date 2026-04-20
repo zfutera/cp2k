@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -38,7 +38,8 @@ MODULE space_groups
                                               jacobi
    USE particle_list_types,             ONLY: particle_list_type
    USE physcon,                         ONLY: pascal
-   USE space_groups_types,              ONLY: spgr_type
+   USE space_groups_types,              ONLY: cleanup_spgr_type,&
+                                              spgr_type
    USE spglib_f08,                      ONLY: spg_get_international,&
                                               spg_get_multiplicity,&
                                               spg_get_pointgroup,&
@@ -107,6 +108,8 @@ CONTAINS
 
       spgr => gopt_env%spgr
       CPASSERT(ASSOCIATED(spgr))
+
+      CALL cleanup_spgr_type(spgr)
 
       !..total number of particles (atoms plus shells)
       IF (PRESENT(nparticle)) THEN

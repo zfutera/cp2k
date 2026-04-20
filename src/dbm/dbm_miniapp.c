@@ -1,9 +1,15 @@
 /*----------------------------------------------------------------------------*/
 /*  CP2K: A general program to perform molecular dynamics simulations         */
-/*  Copyright 2000-2025 CP2K developers group <https://cp2k.org>              */
+/*  Copyright 2000-2026 CP2K developers group <https://cp2k.org>              */
 /*                                                                            */
 /*  SPDX-License-Identifier: BSD-3-Clause                                     */
 /*----------------------------------------------------------------------------*/
+#include "dbm_library.h"
+#include "dbm_matrix.h"
+
+#include "../mpiwrap/cp_mpi.h"
+#include "../offload/offload_library.h"
+#include "../offload/offload_mempool.h"
 
 #include <assert.h>
 #include <omp.h>
@@ -16,18 +22,14 @@
 #include <libxsmm.h>
 #endif
 
-#include "../offload/offload_library.h"
-#include "dbm_library.h"
-#include "dbm_matrix.h"
-#include "dbm_mpi.h"
-
 /*******************************************************************************
  * \brief Wrapper for printf, passed to dbm_library_print_stats.
  * \author Ole Schuett
  ******************************************************************************/
-static void print_func(char *message, int output_unit) {
+static void print_func(const char *msg, int msglen, int output_unit) {
+  (void)msglen;           // mark used
   if (output_unit == 0) { // i.e. my_rank == 0
-    printf("%s", message);
+    printf("%s", msg);
   }
 }
 
@@ -42,11 +44,12 @@ static inline int imin(int x, int y) { return (x < y ? x : y); }
  * \author Ole Schuett
  ******************************************************************************/
 static dbm_distribution_t *create_dist(const int nrows, const int ncols,
-                                       const dbm_mpi_comm_t comm) {
+                                       const cp_mpi_comm_t comm) {
   int cart_dims[2], cart_periods[2], cart_coords[2];
-  dbm_mpi_cart_get(comm, 2, cart_dims, cart_periods, cart_coords);
+  cp_mpi_cart_get(comm, 2, cart_dims, cart_periods, cart_coords);
 
   // Create distribution.
+  assert(0 < nrows && 0 < ncols);
   int *row_dist = malloc(nrows * sizeof(int));
   int *col_dist = malloc(ncols * sizeof(int));
   assert(row_dist != NULL && col_dist != NULL);
@@ -56,7 +59,7 @@ static dbm_distribution_t *create_dist(const int nrows, const int ncols,
   for (int i = 0; i < ncols; i++) {
     col_dist[i] = i % cart_dims[1];
   }
-  const int fortran_comm = dbm_mpi_comm_c2f(comm);
+  const int fortran_comm = cp_mpi_comm_c2f(comm);
   dbm_distribution_t *dist = NULL;
   dbm_distribution_new(&dist, fortran_comm, nrows, ncols, row_dist, col_dist);
   free(row_dist);
@@ -71,11 +74,12 @@ static dbm_distribution_t *create_dist(const int nrows, const int ncols,
 static dbm_matrix_t *
 create_some_matrix(const int nrows, const int ncols, const int nrows_min,
                    const int nrows_max, const int ncols_min,
-                   const int ncols_max, const dbm_mpi_comm_t comm) {
+                   const int ncols_max, const cp_mpi_comm_t comm) {
   // Create distribution.
   dbm_distribution_t *dist = create_dist(nrows, ncols, comm);
 
   // Create matrix.
+  assert(0 < nrows && 0 < ncols);
   int *row_sizes = malloc(nrows * sizeof(int));
   int *col_sizes = malloc(ncols * sizeof(int));
   assert(row_sizes != NULL && col_sizes != NULL);
@@ -131,9 +135,12 @@ static void reserve_all_blocks(dbm_matrix_t *matrix) {
         }
       }
     }
-    int *reserve_row = malloc(nblocks * sizeof(int));
-    int *reserve_col = malloc(nblocks * sizeof(int));
-    assert(reserve_row != NULL && reserve_col != NULL);
+    int *reserve_row = NULL, *reserve_col = NULL;
+    if (0 < nblocks) {
+      reserve_row = malloc(nblocks * sizeof(int));
+      reserve_col = malloc(nblocks * sizeof(int));
+      assert(reserve_row != NULL && reserve_col != NULL);
+    }
     int iblock = 0;
 #pragma omp for collapse(2)
     for (int row = 0; row < nrows; row++) {
@@ -142,7 +149,7 @@ static void reserve_all_blocks(dbm_matrix_t *matrix) {
             matrix->dist->my_rank) {
           reserve_row[iblock] = row;
           reserve_col[iblock] = col;
-          iblock++;
+          ++iblock;
         }
       }
     }
@@ -168,11 +175,7 @@ static void set_all_blocks(dbm_matrix_t *matrix) {
       dbm_iterator_next_block(iter, &row, &col, &block, &row_size, &col_size);
       const int block_size = row_size * col_size;
       for (int i = 0; i < block_size; i++) {
-#if defined(DBM_VALIDATE_AGAINST_LIBXSMM) && defined(__LIBXSMM)
         block[i] = 1.0 / (i + 1);
-#else
-        block[i] = 1.0;
-#endif
       }
     }
     dbm_iterator_stop(iter);
@@ -183,16 +186,11 @@ static void set_all_blocks(dbm_matrix_t *matrix) {
  * \author Ole Schuett
  ******************************************************************************/
 void benchmark_multiply(const int M, const int N, const int K, const int m,
-                        const int n, const int k, const dbm_mpi_comm_t comm) {
-#if defined(DBM_VALIDATE_AGAINST_LIBXSMM) && defined(__LIBXSMM)
+                        const int n, const int k, const cp_mpi_comm_t comm) {
   dbm_matrix_t *matrix_a = create_some_matrix(M, K, 1, m, k, k, comm);
   dbm_matrix_t *matrix_b = create_some_matrix(K, N, k, k, 1, n, comm);
-#else
-  dbm_matrix_t *matrix_a = create_some_matrix(M, K, m, m, k, k, comm);
-  dbm_matrix_t *matrix_b = create_some_matrix(K, N, k, k, n, n, comm);
-#endif
   dbm_distribution_t *dist_c = create_dist(M, N, comm);
-  dbm_matrix_t *matrix_c = NULL;
+  dbm_matrix_t *matrix_c = NULL, *matrix_d = NULL;
   dbm_create(&matrix_c, dist_c, "result", M, N, matrix_a->row_sizes,
              matrix_b->col_sizes);
   dbm_distribution_release(dist_c);
@@ -202,40 +200,49 @@ void benchmark_multiply(const int M, const int N, const int K, const int m,
   set_all_blocks(matrix_a);
   set_all_blocks(matrix_b);
 
+  const char *const verify_env = getenv("DBM_MULTIPLY_VERIFY");
+  const int skip_verify = (NULL == verify_env ? 0 : (atoi(verify_env) + 1));
+
+  if (0 == skip_verify) {
+    dbm_distribution_t *const dist_shared = matrix_c->dist;
+    dbm_create(&matrix_d, dist_shared, matrix_c->name, matrix_c->nrows,
+               matrix_c->ncols, matrix_c->row_sizes, matrix_c->col_sizes);
+    dbm_copy(matrix_d, matrix_c);
+  }
+
   int64_t flop = 0;
   const double time_start_multiply = omp_get_wtime();
   dbm_multiply(false, false, 1.0, matrix_a, matrix_b, 1.0, matrix_c, false,
                1e-8, &flop);
   const double time_end_multiply = omp_get_wtime();
 
-  // Validate checksum.
-  // Since all matrix elements were set to 1.0 the checksum is an integer.
-#if defined(DBM_VALIDATE_AGAINST_LIBXSMM) && defined(__LIBXSMM)
-  const double expected = 0, checksum = 0;
-#else
-  const double expected = (uint64_t)M * m * N * n * K * K * k * k;
-  const double checksum = dbm_checksum(matrix_c);
-#endif
+  if (cp_mpi_comm_rank(comm) == 0) {
+    printf("%5i x %5i x %5i  with  %3i x %3i x %3i blocks: ", M, N, K, m, n, k);
+  }
+
+  if (NULL != matrix_d) { // Calculate result on the host for validation.
+    dbm_multiply(false, false, 1.0, matrix_a, matrix_b, 1.0, matrix_d, false,
+                 1e-8, NULL);
+
+    const double maxeps = 1E-5, epsilon = dbm_maxeps(matrix_d, matrix_c);
+    if (maxeps < epsilon) {
+      printf("ERROR\n");
+      fprintf(stderr, "Failed validation (epsilon=%f).\n", epsilon);
+      exit(1);
+    }
+    dbm_release(matrix_d);
+  }
+
+  cp_mpi_sum_int64(&flop, 1, comm);
+  if (cp_mpi_comm_rank(comm) == 0) {
+    const double duration = time_end_multiply - time_start_multiply;
+    printf("%6.3f s =>  %6.1f GFLOP/s\n", duration, 1e-9 * flop / duration);
+    fflush(stdout);
+  }
 
   dbm_release(matrix_a);
   dbm_release(matrix_b);
   dbm_release(matrix_c);
-
-  if (dbm_mpi_comm_rank(comm) == 0) {
-    printf("%5i x %5i x %5i  with  %3i x %3i x %3i blocks: ", M, N, K, m, n, k);
-  }
-  if (checksum == expected) {
-    dbm_mpi_sum_int64(&flop, 1, comm);
-    if (dbm_mpi_comm_rank(comm) == 0) {
-      const double duration = time_end_multiply - time_start_multiply;
-      printf("%6.3f s =>  %6.1f GFLOP/s\n", duration, 1e-9 * flop / duration);
-      fflush(stdout);
-    }
-  } else {
-    printf("ERROR\n");
-    fprintf(stderr, "Expected checksum %f but got %f.\n", expected, checksum);
-    exit(1);
-  }
 }
 
 /*******************************************************************************
@@ -247,12 +254,12 @@ int main(int argc, char *argv[]) {
 
   srand(25071975); // seed rng
 
-  dbm_mpi_init(&argc, &argv);
+  cp_mpi_init(&argc, &argv);
   dbm_library_init();
 
-  const dbm_mpi_comm_t world_comm = dbm_mpi_get_comm_world();
-  const int nranks = dbm_mpi_comm_size(world_comm);
-  const int my_rank = dbm_mpi_comm_rank(world_comm);
+  const cp_mpi_comm_t world_comm = cp_mpi_get_comm_world();
+  const int nranks = cp_mpi_comm_size(world_comm);
+  const int my_rank = cp_mpi_comm_rank(world_comm);
 
   if (offload_get_device_count() > 0) {
     offload_set_chosen_device(my_rank % offload_get_device_count());
@@ -260,10 +267,9 @@ int main(int argc, char *argv[]) {
 
   // Create 2D cart.
   int dims[2] = {0, 0};
-  dbm_mpi_dims_create(nranks, 2, dims);
+  cp_mpi_dims_create(nranks, 2, dims);
   const int periods[2] = {true, true};
-  dbm_mpi_comm_t comm =
-      dbm_mpi_cart_create(world_comm, 2, dims, periods, false);
+  cp_mpi_comm_t comm = cp_mpi_cart_create(world_comm, 2, dims, periods, false);
 
   if (my_rank == 0) {
     printf("OpenMP-threads: %i  GPUs: %i", omp_get_max_threads(),
@@ -348,11 +354,13 @@ int main(int argc, char *argv[]) {
   }
 
   if (EXIT_SUCCESS == result) {
-    dbm_library_print_stats(dbm_mpi_comm_c2f(comm), &print_func, my_rank);
+    const int fortran_comm = cp_mpi_comm_c2f(comm);
+    dbm_library_print_stats(fortran_comm, &print_func, my_rank);
+    offload_mempool_stats_print(fortran_comm, &print_func, my_rank);
   }
   dbm_library_finalize();
-  dbm_mpi_comm_free(&comm);
-  dbm_mpi_finalize();
+  cp_mpi_comm_free(&comm);
+  cp_mpi_finalize();
   return result;
 }
 

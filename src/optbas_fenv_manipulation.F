@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -186,8 +186,9 @@ CONTAINS
          END IF
       END DO
 
-      CALL read_mo_set_from_restart(mos, atomic_kind_set, qs_kind_set, particle_set, para_env, &
-                                    id_nr=0, multiplicity=dft_control%multiplicity, dft_section=dft_section, &
+      CALL read_mo_set_from_restart(mos, qs_kind_set, particle_set, para_env, id_nr=0, &
+                                    multiplicity=dft_control%multiplicity, &
+                                    dft_section=dft_section, &
                                     natom_mismatch=natom_mismatch)
 
    END SUBROUTINE allocate_mo_sets

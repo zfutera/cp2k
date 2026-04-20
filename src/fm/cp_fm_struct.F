@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -138,7 +138,7 @@ CONTAINS
       TYPE(cp_blacs_env_type), TARGET, OPTIONAL    :: context
       INTEGER, DIMENSION(9), INTENT(in), OPTIONAL  :: descriptor
       INTEGER, OPTIONAL, DIMENSION(2)              :: first_p_pos
-      TYPE(cp_fm_struct_type), POINTER, OPTIONAL   :: template_fmstruct
+      TYPE(cp_fm_struct_type), TARGET, OPTIONAL    :: template_fmstruct
       LOGICAL, OPTIONAL, INTENT(in)                :: square_blocks
       LOGICAL, OPTIONAL, INTENT(in)                :: force_block
 
@@ -233,7 +233,7 @@ CONTAINS
       ALLOCATE (fmstruct%nrow_locals(0:(fmstruct%context%num_pe(1) - 1)), &
                 fmstruct%ncol_locals(0:(fmstruct%context%num_pe(2) - 1)))
       IF (.NOT. PRESENT(template_fmstruct)) &
-         fmstruct%first_p_pos = (/0, 0/)
+         fmstruct%first_p_pos = [0, 0]
       IF (PRESENT(first_p_pos)) fmstruct%first_p_pos = first_p_pos
 
       fmstruct%nrow_locals = 0
@@ -252,8 +252,8 @@ CONTAINS
       fmstruct%nrow_locals(:) = fmstruct%nrow_locals(:)/fmstruct%context%num_pe(2)
       fmstruct%ncol_locals(:) = fmstruct%ncol_locals(:)/fmstruct%context%num_pe(1)
 
-      IF (SUM(fmstruct%ncol_locals) .NE. fmstruct%ncol_global .OR. &
-          SUM(fmstruct%nrow_locals) .NE. fmstruct%nrow_global) THEN
+      IF (SUM(fmstruct%ncol_locals) /= fmstruct%ncol_global .OR. &
+          SUM(fmstruct%nrow_locals) /= fmstruct%nrow_global) THEN
          ! try to collect some output if this is going to happen again
          ! this seems to trigger on blanc, but should really never happen
          logger => cp_get_default_logger()
@@ -266,9 +266,9 @@ CONTAINS
          CALL m_flush(iunit)
       END IF
 
-      IF (SUM(fmstruct%ncol_locals) .NE. fmstruct%ncol_global) &
+      IF (SUM(fmstruct%ncol_locals) /= fmstruct%ncol_global) &
          CPABORT("sum of local cols not equal global cols")
-      IF (SUM(fmstruct%nrow_locals) .NE. fmstruct%nrow_global) &
+      IF (SUM(fmstruct%nrow_locals) /= fmstruct%nrow_global) &
          CPABORT("sum of local row not equal global rows")
 #else
       ! block = full matrix

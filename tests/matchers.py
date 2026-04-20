@@ -1,7 +1,13 @@
 import re
+import sys
 import traceback
 from dataclasses import dataclass
-from typing import Any, Dict, Tuple, Optional, Protocol, Literal
+from typing import Any, Dict, Tuple, Optional
+
+if sys.version_info >= (3, 8):
+    from typing import Literal, Protocol
+else:
+    from typing_extensions import Literal, Protocol
 
 
 # ======================================================================================
@@ -33,7 +39,6 @@ class GenericMatcher(Matcher):
         self.pattern = pattern
         for c in r"[]()|+*?":
             pattern = pattern.replace(c, f"\\{c}")  # escape special chars
-        pattern = pattern.replace("  ", r"\s\s+")
         self.regex = re.compile(pattern)
         self.col = col
 
@@ -86,7 +91,10 @@ registry["M004"] = GenericMatcher(r"Ideal and single determinant", col=8)
 registry["M005"] = GenericMatcher(r"BSSE-free interaction energy:", col=5)
 registry["M006"] = GenericMatcher(r"Average Energy", col=4)
 registry["M007"] = GenericMatcher(r"OPT| Total energy [hartree]", col=5)
-registry["M008"] = GenericMatcher(r"VIB|Frequency", col=3)
+
+registry["Vib_freq"] = GenericMatcher(r"VIB|Frequency", col=3)  # M008
+registry["Vib_frc_const"] = GenericMatcher(r"VIB|Frc consts", col=4)  # M128
+
 registry["M009"] = GenericMatcher(r"PINT| Total energy =", col=5)
 registry["M010"] = GenericMatcher(r"BAND TOTAL ENERGY [au]", col=6)
 registry["M011"] = GenericMatcher(r"ENERGY| Total FORCE_EVAL", col=9)
@@ -149,7 +157,7 @@ registry["M064"] = GenericMatcher(r"^  C", col=3)
 registry["M065"] = GenericMatcher(r"^  C", col=4)
 registry["M066"] = GenericMatcher(r"HF Etotal", col=3)
 registry["M067"] = GenericMatcher(r"Energy Level:", col=9)
-registry["M068"] = GenericMatcher(r"TDDFPT|  1", col=3)
+registry["TDDFPT_excit_ener"] = GenericMatcher(r"TDDFPT|      1", col=3)
 registry["M069"] = GenericMatcher(r"Log(1-CN):", col=10)
 registry["M070"] = GenericMatcher(r"MD| Temperature [K]", col=4)
 registry["M071"] = GenericMatcher(r"Current value of constraint", col=6)
@@ -175,7 +183,7 @@ registry["M084"] = GenericMatcher(r"Ionization potential of the excited atom:", 
 registry["M085"] = GenericMatcher(r"Total FORCE_EVAL ( SIRIUS ) energy", col=9)
 registry["M086"] = GenericMatcher(r"DIPOLE : CheckSum  =", col=5)
 registry["M087"] = GenericMatcher(r"POLAR : CheckSum  =", col=5)
-registry["M088"] = GenericMatcher(r"XAS excitation energy (eV):", col=7)
+registry["XAS_excit_ener"] = GenericMatcher(r"XAS excitation energy (eV):", col=7)
 registry["M089"] = GenericMatcher(r"Electronic density on regular grids:", col=7)
 registry["M090"] = GenericMatcher(r"Final localization:", col=3)
 registry["M091"] = GenericMatcher(r"Ionization potentials for XPS", col=8)
@@ -213,10 +221,14 @@ registry["E_SCF_SOC_gap"] = GenericMatcher(r"SCF+SOC direct band gap", col=6)
 registry["E_G0W0_SOC_gap"] = GenericMatcher(r"G0W0+SOC direct band gap", col=6)
 
 # Lowest BSE excitation energy in Tamm-Dancoff approximation (TDA)
-registry["BSE_1st_excit_ener_TDA"] = GenericMatcher(r"BSE|  1  Singlet  -TDA-", col=5)
+registry["BSE_1st_excit_ener_TDA"] = GenericMatcher(
+    r"BSE|                1       Singlet          -TDA-", col=5
+)
 
 # Lowest BSE excitation energy
-registry["BSE_1st_excit_ener"] = GenericMatcher(r"BSE|  1  Singlet  -ABBA-", col=5)
+registry["BSE_1st_excit_ener"] = GenericMatcher(
+    r"BSE|                1       Singlet         -ABBA-", col=5
+)
 
 # evGW0 HOMO-LUMO gap of molecule
 registry["E_evGW0_gap"] = GenericMatcher(
@@ -228,16 +240,20 @@ registry["E_evGW_gap"] = GenericMatcher(
     r"HOMO-LUMO gap in evGW iteration  3 (eV)", col=8
 )
 
-registry["M113"] = GenericMatcher(r"BSE|  1  -TDA-", col=7)
-registry["M114"] = GenericMatcher(r"BSE|  1  -ABBA-", col=7)
+registry["M113"] = GenericMatcher(r"BSE|             1     -TDA-", col=7)
+registry["M114"] = GenericMatcher(r"BSE|             1    -ABBA-", col=7)
 registry["M115"] = GenericMatcher(r"MOMENTS_TRACE_RE|     0.10000000E+000", col=3)
 registry["M116"] = GenericMatcher(r"MOMENTS_TRACE_IM|     0.10000000E+000", col=3)
 registry["M117"] = GenericMatcher(r"MOMENTS_TRACE_RE|     0.20000000E+000", col=3)
-registry["M118"] = GenericMatcher(r"POLARIZABILITY|     0.32436607E+002", col=4)
+registry["M118"] = GenericMatcher(r"POLARIZABILITY|     0.28949671E+002", col=4)
 registry["M119"] = GenericMatcher(r"DEBUG:: Total Force", col=6)
 registry["M120"] = GenericMatcher(r"SMEAGOL| Number of electrons:", col=5)
-registry["M121"] = GenericMatcher(r"BSE|  3  -TDA-  2", col=5)
-registry["M122"] = GenericMatcher(r"BSE|  3  -ABBA-  2", col=5)
+registry["M121"] = GenericMatcher(
+    r"BSE|             3     -TDA-                2", col=5
+)
+registry["M122"] = GenericMatcher(
+    r"BSE|             3    -ABBA-                2", col=5
+)
 registry["M123"] = GenericMatcher(r"Checksum exciton descriptors", col=4)
 registry["M124"] = GenericMatcher(
     r"BSE|DEBUG| Averaged dynamical dipole polarizability at 8.2 eV:", col=9
@@ -250,4 +266,19 @@ registry["RTBSE_GXAC_H2_pol"] = GenericMatcher(
     r"POLARIZABILITY_PADE|     0.30450000E+002", col=4
 )
 
+registry["M126"] = GenericMatcher(r" # Total charge ", col=5)
+
+registry["M127"] = GenericMatcher(r"Checksum (Acoustic Sum Rule):", col=5)
+
+# Dipole moment calculated at a specific k-point (-0.375,-0.375, 0.00)
+registry["Dipole_at_kp_1"] = GenericMatcher(r"  1   1   2", col=4)
+
+# Dipole moment calculated at a specific k-point (-0.375,-0.375, 0.00)
+registry["Dipole_for_CrSBr"] = GenericMatcher(r"  1  31  32", col=4)
+
+# Berry curvature calculated from dipoles near K point in graphene BZ
+registry["BC_near_K_point"] = GenericMatcher(r"   1    4", col=5)
+
+# GEXT extrapolation
+registry["gext"] = GenericMatcher(r"GEXT overlap fitting error:", col=5)
 # EOF

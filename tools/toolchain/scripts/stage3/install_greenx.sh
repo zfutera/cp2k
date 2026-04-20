@@ -3,8 +3,9 @@
 [ "${BASH_SOURCE[0]}" ] && SCRIPT_NAME="${BASH_SOURCE[0]}" || SCRIPT_NAME=$0
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_NAME")/.." && pwd -P)"
 
-greenx_ver="2.1"
-greenx_sha256="2fc1fc2c93b0bab14babc33386f7932192336813cea6db11cd27dbc36b541e41"
+greenx_ver="2.2"
+greenx_sha256="cf0abb77cc84a3381a690a6ac7ca839da0007bb9e6120f3f25e47de50e29431f"
+
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}"/common_vars.sh
 # shellcheck disable=SC1091
@@ -18,9 +19,6 @@ source "${INSTALLDIR}"/toolchain.env
 
 [ -f "${BUILDDIR}/setup_greenx" ] && rm "${BUILDDIR}/setup_greenx"
 
-GREENX_CFLAGS=""
-GREENX_LDFLAGS=""
-GREENX_LIBS=""
 ! [ -d "${BUILDDIR}" ] && mkdir -p "${BUILDDIR}"
 cd "${BUILDDIR}"
 with_greenx=${with_greenx:__DONTUSE__}
@@ -33,11 +31,7 @@ case "$with_greenx" in
     if verify_checksums "${install_lock_file}"; then
       echo "greenX-${greenx_ver} is already installed, skipping it."
     else
-      if [ -f greenX-${greenx_ver}.tar.gz ]; then
-        echo "greenX-${greenx_ver}.tar.gz is found"
-      else
-        download_pkg_from_cp2k_org "${greenx_sha256}" "greenX-${greenx_ver}.tar.gz"
-      fi
+      retrieve_package "${greenx_sha256}" "greenX-${greenx_ver}.tar.gz"
       echo "Installing from scratch into ${pkg_install_dir}"
       [ -d greenX-${greenx_ver} ] && rm -rf greenX-${greenx_ver}
       tar -xzf greenX-${greenx_ver}.tar.gz
@@ -58,14 +52,14 @@ case "$with_greenx" in
         -DMINIMAX_COMPONENT=ON \
         -DENABLE_GNU_GMP=$gmp_flag \
         -DENABLE_GREENX_CTEST=OFF \
-        .. > configure.log 2>&1 || tail -n "${LOG_LINES}" configure.log
-      make -j "$(get_nprocs)" > make.log 2>&1 || tail -n "${LOG_LINES}" make.log
-      make install > install.log 2>&1 || tail -n "${LOG_LINES}" install.log
+        .. > configure.log 2>&1 || tail_excerpt configure.log
+      make -j "$(get_nprocs)" > make.log 2>&1 || tail_excerpt make.log
+      make install > install.log 2>&1 || tail_excerpt install.log
       write_checksums "${install_lock_file}" "${SCRIPT_DIR}/stage3/$(basename "${SCRIPT_NAME}")"
       cd ..
     fi
     GREENX_CFLAGS="-I'${pkg_install_dir}/include/modules'"
-    GREENX_LDFLAGS="-L'${pkg_install_dir}/lib'"
+    GREENX_LDFLAGS="-L'${pkg_install_dir}/lib' -Wl,-rpath,'${pkg_install_dir}/lib'"
     ;;
   __SYSTEM__)
     echo "==================== Finding GreenX from system paths ===================="
@@ -108,7 +102,7 @@ export CP_LDFLAGS="\${CP_LDFLAGS} ${GREENX_LDFLAGS}"
 export CP_LIBS="${GREENX_LIBS} \${CP_LIBS}"
 export GREENX_ROOT="${pkg_install_dir}"
 EOF
-  cat "${BUILDDIR}/setup_greenx" >> "$SETUPFILE"
+  filter_setup "${BUILDDIR}/setup_greenx" "${SETUPFILE}"
 fi
 
 load "${BUILDDIR}/setup_greenx"

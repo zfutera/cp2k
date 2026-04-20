@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -9,6 +9,7 @@
 !> \brief Utility routines for qs_scf
 ! **************************************************************************************************
 MODULE qs_scf_initialization
+   USE atomic_kind_types,               ONLY: atomic_kind_type
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_api,                    ONLY: dbcsr_create,&
                                               dbcsr_init_p,&
@@ -25,8 +26,11 @@ MODULE qs_scf_initialization
                                               cp_fm_transpose,&
                                               cp_fm_triangular_invert
    USE cp_fm_cholesky,                  ONLY: cp_fm_cholesky_decompose
-   USE cp_fm_diag,                      ONLY: choose_eigv_solver,&
-                                              cp_fm_power
+   USE cp_fm_diag,                      ONLY: FM_DIAG_TYPE_CUSOLVER,&
+                                              choose_eigv_solver,&
+                                              cp_fm_power,&
+                                              cusolver_generalized,&
+                                              diag_type
    USE cp_fm_pool_types,                ONLY: cp_fm_pool_p_type,&
                                               fm_pool_get_el_struct
    USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
@@ -47,6 +51,7 @@ MODULE qs_scf_initialization
                                               cp_print_key_finished_output,&
                                               cp_print_key_should_output,&
                                               cp_print_key_unit_nr
+   USE hairy_probes,                    ONLY: AO_boundaries
    USE input_constants,                 ONLY: &
         broy_mix, cholesky_dbcsr, cholesky_inverse, cholesky_off, diag_block_davidson, &
         diag_block_krylov, diag_filter_matrix, diag_ot, diag_standard, direct_p_mix, kerker_mix, &
@@ -60,6 +65,7 @@ MODULE qs_scf_initialization
    USE kpoint_types,                    ONLY: kpoint_type
    USE message_passing,                 ONLY: mp_para_env_type
    USE parallel_gemm_api,               ONLY: parallel_gemm
+   USE particle_types,                  ONLY: particle_type
    USE pw_types,                        ONLY: pw_c1d_gs_type
    USE qmmm_image_charge,               ONLY: conditional_calc_image_matrix
    USE qs_block_davidson_types,         ONLY: block_davidson_allocate,&
@@ -104,7 +110,8 @@ MODULE qs_scf_initialization
    USE qs_rho_types,                    ONLY: qs_rho_create,&
                                               qs_rho_get,&
                                               qs_rho_type
-   USE qs_scf_diagonalization,          ONLY: diag_subspace_allocate
+   USE qs_scf_diagonalization,          ONLY: diag_kp_smat,&
+                                              diag_subspace_allocate
    USE qs_scf_lanczos,                  ONLY: krylov_space_allocate
    USE qs_scf_output,                   ONLY: qs_scf_initial_info
    USE qs_scf_types,                    ONLY: &
@@ -145,11 +152,30 @@ CONTAINS
       TYPE(scf_control_type), OPTIONAL, POINTER          :: scf_control
       TYPE(section_vals_type), OPTIONAL, POINTER         :: scf_section
 
+      INTEGER                                            :: ip, np
+      TYPE(atomic_kind_type), POINTER                    :: atomic_kind_set(:)
       TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(mo_set_type), DIMENSION(:), POINTER           :: mos
+      TYPE(particle_type), POINTER                       :: particle_set(:)
+      TYPE(qs_kind_type), POINTER                        :: qs_kind_set(:)
       TYPE(scf_control_type), POINTER                    :: my_scf_control
       TYPE(section_vals_type), POINTER                   :: dft_section, input, my_scf_section
 
       CALL get_qs_env(qs_env, input=input, dft_control=dft_control)
+
+      !Initialize Hairy Probe calculation
+      IF (dft_control%hairy_probes .EQV. .TRUE.) THEN
+         CALL get_qs_env(qs_env, &
+                         mos=mos, &
+                         atomic_kind_set=atomic_kind_set, &
+                         qs_kind_set=qs_kind_set, &
+                         particle_set=particle_set)
+         np = SIZE(dft_control%probe)
+         DO ip = 1, np
+            CALL AO_boundaries(probe=dft_control%probe(ip), atomic_kind_set=atomic_kind_set, qs_kind_set=qs_kind_set, &
+                               particle_set=particle_set, nAO=mos(1)%nao) !FIX THIS!
+         END DO
+      END IF
 
       IF (PRESENT(scf_control)) THEN
          my_scf_control => scf_control
@@ -506,12 +532,6 @@ CONTAINS
 
       IF (dft_control%dft_plus_u) THEN
          IF (dft_control%plus_u_method_id == plus_u_lowdin) THEN
-            IF (.NOT. ASSOCIATED(scf_env%scf_work2)) THEN
-               ALLOCATE (scf_env%scf_work2)
-               CALL cp_fm_create(scf_env%scf_work2, &
-                                 matrix_struct=ao_ao_fmstruct, &
-                                 name="SCF-WORK_MATRIX-2")
-            END IF
             IF (.NOT. ASSOCIATED(scf_env%s_half)) THEN
                ALLOCATE (scf_env%s_half)
                CALL cp_fm_create(scf_env%s_half, &
@@ -577,7 +597,7 @@ CONTAINS
       nmo_mat = dft_control%nspins
       IF (dft_control%restricted) nmo_mat = 1 ! right now, there might be more mos than needed derivs
 
-!   *** finish initialization of the MOs ***
+      ! Finish initialization of the MOs
       CPASSERT(ASSOCIATED(mos))
       DO ispin = 1, SIZE(mos)
          CALL get_mo_set(mos(ispin), mo_coeff=mo_coeff, mo_coeff_b=mo_coeff_b)
@@ -593,7 +613,7 @@ CONTAINS
                                                    sym=dbcsr_type_no_symmetry)
          END IF
       END DO
-!   *** get the mo_derivs OK if needed ***
+      ! Get the mo_derivs OK if needed
       IF (qs_env%requires_mo_derivs) THEN
          CALL get_qs_env(qs_env, mo_derivs=mo_derivs)
          IF (.NOT. ASSOCIATED(mo_derivs)) THEN
@@ -612,12 +632,12 @@ CONTAINS
          ! nothing should be done
       END IF
 
-!   *** finish initialization of the MOs for ADMM and derivs if needed ***
+      ! Finish initialization of the MOs for ADMM and derivs if needed ***
       IF (dft_control%do_admm) THEN
          IF (dft_control%restricted) CPABORT("ROKS with ADMM is not implemented")
       END IF
 
-! *** finish initialization of mos_last_converged *** [SGh]
+      ! Finish initialization of mos_last_converged [SGh]
       IF (dft_control%switch_surf_dip) THEN
          CPASSERT(ASSOCIATED(mos_last_converged))
          DO ispin = 1, SIZE(mos_last_converged)
@@ -641,6 +661,8 @@ CONTAINS
          END IF
          IF (dft_control%do_xas_calculation) &
             CPABORT("No XAS implemented with kpoints")
+         IF (qs_env%do_rixs) &
+            CPABORT("RIXS not implemented with kpoints")
          DO ik = 1, SIZE(kpoints%kp_env)
             CALL mpools_get(kpoints%mpools, ao_mo_fm_pools=ao_mo_fm_pools)
             mos_k => kpoints%kp_env(ik)%kpoint_env%mos
@@ -782,6 +804,12 @@ CONTAINS
          CASE (diag_standard)
             scf_env%method = general_diag_method_nr
             scf_env%needs_ortho = (.NOT. has_unit_metric) .AND. (.NOT. do_kpoints)
+            IF (diag_type == FM_DIAG_TYPE_CUSOLVER .AND. &
+                cusolver_generalized .AND. &
+                scf_control%level_shift == 0.0_dp .AND. &
+                scf_env%cholesky_method /= cholesky_off) THEN
+               scf_env%needs_ortho = .FALSE.
+            END IF
             IF (has_unit_metric) THEN
                scf_env%method = special_diag_method_nr
             END IF
@@ -842,13 +870,13 @@ CONTAINS
             IF (do_kpoints) &
                CPABORT("No subspace diagonlization with kpoint calculation")
          END IF
-         ! OT: check if OT is used instead of diagonlization. Not possible with added MOS at the moment
+         ! OT: check if OT is used instead of diagonalization. Not possible with added MOS at the moment
       ELSEIF (scf_control%use_ot) THEN
          scf_env%method = ot_method_nr
          need_coeff_b = .TRUE.
          IF (SUM(ABS(scf_control%added_mos)) > 0) &
             CPABORT("OT with ADDED_MOS/=0 not implemented")
-         IF (dft_control%restricted .AND. dft_control%nspins .NE. 2) &
+         IF (dft_control%restricted .AND. dft_control%nspins /= 2) &
             CPABORT("nspin must be 2 for restricted (ROKS)")
          IF (do_kpoints) &
             CPABORT("OT not possible with kpoint calculations")
@@ -891,11 +919,13 @@ CONTAINS
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: evals
       REAL(KIND=dp), DIMENSION(:), POINTER               :: eigenvalues
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
-      TYPE(cp_fm_type)                                   :: evecs
+      TYPE(cp_fm_type)                                   :: evecs, fm_w
       TYPE(cp_fm_type), POINTER                          :: mo_coeff
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s
+      TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_s_kp
       TYPE(dft_control_type), POINTER                    :: dft_control
+      TYPE(kpoint_type), POINTER                         :: kpoints
       TYPE(mo_set_type), DIMENSION(:), POINTER           :: mos
       TYPE(mp_para_env_type), POINTER                    :: para_env
       TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
@@ -924,13 +954,17 @@ CONTAINS
                       para_env=para_env, &
                       xas_env=xas_env)
 
-      output_unit = cp_print_key_unit_nr(logger, scf_section, "PRINT%PROGRAM_RUN_INFO", &
-                                         extension=".scfLog")
-      CALL qs_scf_initial_info(output_unit, mos, dft_control)
-      CALL cp_print_key_finished_output(output_unit, logger, scf_section, &
-                                        "PRINT%PROGRAM_RUN_INFO")
+      !Check restricted optimizers available for tblite library
+      IF (dft_control%qs_control%xtb_control%do_tblite) THEN
+         IF (dft_control%lsd) THEN
+            CPABORT("LSD option not compatible with tblite library.")
+         END IF
+         IF (scf_env%method == ot_method_nr) THEN
+            CPABORT("OT SCF option not compatible with tblite library.")
+         END IF
+      END IF
 
-      ! calc ortho matrix
+      ! Calculate ortho matrix
       ndep = 0
       IF (scf_env%needs_ortho) THEN
          CALL get_qs_env(qs_env, matrix_s=matrix_s)
@@ -1008,7 +1042,7 @@ CONTAINS
 
             CALL cp_fm_column_scale(scf_env%ortho_red, evals(ndep + 1:))
 
-            ! Copy the linear dependent columns to the mo sets and set their orbital energies
+            ! Copy the linear dependent columns to the MO sets and set their orbital energies
             ! to a very large value to reduce the probability of occupying them
             DO ispin = 1, SIZE(mos)
                CALL get_mo_set(mos(ispin), nmo=nmo, mo_coeff=mo_coeff, homo=homo, eigenvalues=eigenvalues)
@@ -1021,8 +1055,8 @@ CONTAINS
                   END IF
                   CALL cp_warn(__LOCATION__, &
                                "The numerical rank of the overlap matrix is lower than the number of requested MOs! "// &
-                             "Reduce the number of MOs to the number of available MOs. If necessary, request a lower number of "// &
-                               "MOs or increase EPS_DEFAULT or EPS_PGF_ORB.")
+                               "Reduce the number of MOs to the number of available MOs. If necessary, "// &
+                               "request a lower number of MOs or increase EPS_DEFAULT or EPS_PGF_ORB.")
                   CALL set_mo_set(mos(ispin), nmo=needed_evals)
                END IF
                ! Copy the last columns to mo_coeff if the container is large enough
@@ -1068,15 +1102,21 @@ CONTAINS
 
       ! DFT+U methods based on Lowdin charges need S^(1/2)
       IF (dft_control%dft_plus_u) THEN
-         CALL get_qs_env(qs_env, matrix_s=matrix_s)
          IF (dft_control%plus_u_method_id == plus_u_lowdin) THEN
-            IF (s_minus_half_available) THEN
-               CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, scf_env%ortho, scf_env%s_half, &
-                                            nao)
+            IF (do_kpoints) THEN
+               CALL get_qs_env(qs_env, kpoints=kpoints, matrix_s_kp=matrix_s_kp)
+               CALL diag_kp_smat(matrix_s_kp, kpoints, scf_env%scf_work1)
             ELSE
-               CALL copy_dbcsr_to_fm(matrix_s(1)%matrix, scf_env%s_half)
-               CALL cp_fm_power(scf_env%s_half, scf_env%scf_work2, 0.5_dp, &
-                                scf_control%eps_eigval, ndep)
+               CALL get_qs_env(qs_env, matrix_s=matrix_s)
+               IF (s_minus_half_available) THEN
+                  CALL cp_dbcsr_sm_fm_multiply(matrix_s(1)%matrix, scf_env%ortho, &
+                                               scf_env%s_half, nao)
+               ELSE
+                  CALL copy_dbcsr_to_fm(matrix_s(1)%matrix, scf_env%s_half)
+                  CALL cp_fm_create(fm_w, scf_env%s_half%matrix_struct)
+                  CALL cp_fm_power(scf_env%s_half, fm_w, 0.5_dp, scf_control%eps_eigval, ndep)
+                  CALL cp_fm_release(fm_w)
+               END IF
             END IF
          END IF
          DO ikind = 1, SIZE(qs_kind_set)
@@ -1092,15 +1132,6 @@ CONTAINS
             END IF
          END DO
       END IF
-
-      output_unit = cp_print_key_unit_nr(logger, scf_section, "PRINT%PROGRAM_RUN_INFO", &
-                                         extension=".scfLog")
-      IF (output_unit > 0) THEN
-         WRITE (UNIT=output_unit, FMT="(T2,A,T71,I10)") &
-            "Number of independent orbital functions:", nao - ndep
-      END IF
-      CALL cp_print_key_finished_output(output_unit, logger, scf_section, &
-                                        "PRINT%PROGRAM_RUN_INFO")
 
       ! extrapolate outer loop variables
       IF (scf_control%outer_scf%have_scf) THEN
@@ -1140,6 +1171,12 @@ CONTAINS
                                                qmmm_env=qs_env%qmmm_env_qm)
          END IF
       END IF
+
+      output_unit = cp_print_key_unit_nr(logger, scf_section, "PRINT%PROGRAM_RUN_INFO", &
+                                         extension=".scfLog")
+      CALL qs_scf_initial_info(output_unit, mos, dft_control, ndep)
+      CALL cp_print_key_finished_output(output_unit, logger, scf_section, &
+                                        "PRINT%PROGRAM_RUN_INFO")
 
       CALL timestop(handle)
 
@@ -1202,8 +1239,14 @@ CONTAINS
             DO ispin = 1, SIZE(mos)
                CALL get_mo_set(mos(ispin), mo_coeff=mo_coeff, nmo=nmo)
                CALL reorthogonalize_vectors(qs_env, v_matrix=mo_coeff, n_col=nmo)
-               CALL set_mo_occupation(mo_set=mos(ispin), &
-                                      smear=scf_control%smear)
+               IF (dft_control%hairy_probes .EQV. .TRUE.) THEN
+                  scf_control%smear%do_smear = .FALSE.
+                  CALL set_mo_occupation(mo_set=mos(ispin), &
+                                         smear=scf_control%smear, probe=dft_control%probe)
+               ELSE
+                  CALL set_mo_occupation(mo_set=mos(ispin), &
+                                         smear=scf_control%smear)
+               END IF
             END DO
          END IF
       END IF

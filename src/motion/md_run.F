@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -61,7 +61,8 @@ MODULE md_run
                                               md_environment_type,&
                                               need_per_atom_wiener_process,&
                                               set_md_env
-   USE md_util,                         ONLY: md_output
+   USE md_util,                         ONLY: md_output,&
+                                              update_expected_temperature
    USE md_vel_utils,                    ONLY: angvel_control,&
                                               comvel_control,&
                                               setup_velocities,&
@@ -373,8 +374,6 @@ CONTAINS
 
          IF (ASSOCIATED(force_env%qs_env)) THEN
             CALL qs_env_time_update(force_env%qs_env, time, itimes)
-!deb        force_env%qs_env%sim_time = time
-!deb        force_env%qs_env%sim_step = itimes
          END IF
          ! Warm-up engines for metadynamics
          IF (ASSOCIATED(force_env%meta_env)) THEN
@@ -456,8 +455,6 @@ CONTAINS
          !needed when electric field fields are applied
          IF (ASSOCIATED(force_env%qs_env)) THEN
             CALL qs_env_time_update(force_env%qs_env, time, itimes)
-!deb        force_env%qs_env%sim_time = time
-!deb        force_env%qs_env%sim_step = itimes
          END IF
          IF (ehrenfest_md) force_env%qs_env%rtp%istep = istep
 
@@ -475,6 +472,9 @@ CONTAINS
                                        "LAGRANGE_MULTIPLIERS", extension=".LagrangeMultLog", log_filename=.FALSE.)
          simpar%dump_lm = BTEST(cp_print_key_should_output(logger%iter_info, constraint_section, &
                                                            "LAGRANGE_MULTIPLIERS"), cp_p_file)
+
+         ! Update temperature for thermal regions and thermostat regions
+         CALL update_expected_temperature(md_env)
 
          ! Velocity Verlet Integrator
          CALL velocity_verlet(md_env, globenv)

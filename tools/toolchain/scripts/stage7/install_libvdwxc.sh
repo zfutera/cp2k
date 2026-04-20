@@ -35,12 +35,7 @@ case "$with_libvdwxc" in
     if verify_checksums "${install_lock_file}"; then
       echo "libvdwxc-${libvdwxc_ver} is already installed, skipping it."
     else
-      if [ -f libvdwxc-${libvdwxc_ver}.tar.gz ]; then
-        echo "libvdwxc-${libvdwxc_ver}.tar.gz is found"
-      else
-        download_pkg_from_cp2k_org "${libvdwxc_sha256}" "libvdwxc-${libvdwxc_ver}.tar.gz"
-      fi
-
+      retrieve_package "${libvdwxc_sha256}" "libvdwxc-${libvdwxc_ver}.tar.gz"
       echo "Installing from scratch into ${pkg_install_dir}"
       [ -d libvdwxc-${libvdwxc_ver} ] && rm -rf libvdwxc-${libvdwxc_ver}
       tar -xzf libvdwxc-${libvdwxc_ver}.tar.gz
@@ -60,7 +55,7 @@ case "$with_libvdwxc" in
           --prefix="${pkg_install_dir}" \
           --libdir="${pkg_install_dir}/lib" \
           --disable-shared \
-          > configure.log 2>&1 || tail -n ${LOG_LINES} configure.log
+          > configure.log 2>&1 || tail_excerpt configure.log
       else
         ./configure \
           CC="${MPICC}" CFLAGS="${CFLAGS} -fpermissive" \
@@ -70,10 +65,10 @@ case "$with_libvdwxc" in
           --prefix="${pkg_install_dir}" \
           --libdir="${pkg_install_dir}/lib" \
           --disable-shared \
-          > configure.log 2>&1 || tail -n ${LOG_LINES} configure.log
+          > configure.log 2>&1 || tail_excerpt configure.log
       fi
-      make -j $(get_nprocs) > make.log 2>&1 || tail -n ${LOG_LINES} make.log
-      make install > install.log 2>&1 || tail -n ${LOG_LINES} install.log
+      make -j $(get_nprocs) > make.log 2>&1 || tail_excerpt make.log
+      make install > install.log 2>&1 || tail_excerpt install.log
       write_checksums "${install_lock_file}" "${SCRIPT_DIR}/stage7/$(basename ${SCRIPT_NAME})"
     fi
     LIBVDWXC_CFLAGS="-I${pkg_install_dir}/include"
@@ -118,10 +113,9 @@ export CP_DFLAGS="\${CP_DFLAGS} IF_MPI(-D__LIBVDWXC|)"
 export CP_CFLAGS="\${CP_CFLAGS} IF_MPI(${LIBVDWXC_CFLAGS}|)"
 export CP_LDFLAGS="\${CP_LDFLAGS} IF_MPI(${LIBVDWXC_LDFLAGS}|)"
 export CP_LIBS="IF_MPI(${LIBVDWXC_LIBS}|) \${CP_LIBS}"
-export PKG_CONFIG_PATH="${pkg_install_dir}/lib/pkgconfig:${PKG_CONFIG_PATH}"
 export VDWXC_ROOT="${pkg_install_dir}"
 EOF
-  cat "${BUILDDIR}/setup_libvdwxc" >> $SETUPFILE
+  filter_setup "${BUILDDIR}/setup_libvdwxc" "${SETUPFILE}"
 fi
 
 load "${BUILDDIR}/setup_libvdwxc"

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -18,7 +18,9 @@ MODULE mathlib
                                               dp
    USE mathconstants,                   ONLY: euler,&
                                               fac,&
-                                              oorootpi
+                                              oorootpi,&
+                                              z_one,&
+                                              z_zero
 #include "../base/base_uses.f90"
 
    IMPLICIT NONE
@@ -42,7 +44,9 @@ MODULE mathlib
              unit_matrix, diag, &
              erfc_cutoff, &
              diag_antisym, &
-             diag_complex
+             diag_complex, &
+             gemm_square, &
+             geeig_right
 
    ! Public functions
 
@@ -81,6 +85,10 @@ MODULE mathlib
 
    INTERFACE unit_matrix
       MODULE PROCEDURE unit_matrix_d, unit_matrix_z
+   END INTERFACE
+
+   INTERFACE gemm_square
+      MODULE PROCEDURE zgemm_square_2, zgemm_square_3, dgemm_square_2, dgemm_square_3
    END INTERFACE
 
 CONTAINS
@@ -158,7 +166,7 @@ CONTAINS
       ! which the compiler uses to optimize the function to .FALSE. if based on the IEEE module
       ! therefore, pass this to the Fortran runtime/printf, if things are NaN or Inf, error out.
       WRITE (buffer, *) a
-      IF (INDEX(buffer, "N") .NE. 0 .OR. INDEX(buffer, "n") .NE. 0) abnormal_value = .TRUE.
+      IF (INDEX(buffer, "N") /= 0 .OR. INDEX(buffer, "n") /= 0) abnormal_value = .TRUE.
 
    END FUNCTION abnormal_value
 
@@ -1291,7 +1299,7 @@ CONTAINS
          s = ab
          l = aa
       END IF
-      IF (s .NE. 0) THEN
+      IF (s /= 0) THEN
          DO
             rem = MOD(l, s)
             IF (rem == 0) EXIT
@@ -1403,13 +1411,13 @@ CONTAINS
 
       nm1 = n - 1
 
-      IF (n .LT. 0 .OR. x .LT. 0.0_dp .OR. (x .EQ. 0.0_dp .AND. (n .EQ. 0 .OR. n .EQ. 1))) THEN
+      IF (n < 0 .OR. x < 0.0_dp .OR. (x == 0.0_dp .AND. (n == 0 .OR. n == 1))) THEN
          CPABORT("Invalid argument")
-      ELSE IF (n .EQ. 0) THEN !Special case.
+      ELSE IF (n == 0) THEN !Special case.
          expint = EXP(-x)/x
-      ELSE IF (x .EQ. 0.0_dp) THEN !Another special case.
+      ELSE IF (x == 0.0_dp) THEN !Another special case.
          expint = 1.0_dp/nm1
-      ELSE IF (x .GT. 1.0_dp) THEN !Lentz's algorithm (5.2).
+      ELSE IF (x > 1.0_dp) THEN !Lentz's algorithm (5.2).
          b = x + n
          c = 1.0_dp/FPMIN
          d = 1.0_dp/b
@@ -1421,14 +1429,14 @@ CONTAINS
             c = b + a/c
             del = c*d
             h = h*del
-            IF (ABS(del - 1.0_dp) .LT. EPS) THEN
+            IF (ABS(del - 1.0_dp) < EPS) THEN
                expint = h*EXP(-x)
                RETURN
             END IF
          END DO
          CPABORT("continued fraction failed in expint")
       ELSE !Evaluate series.
-         IF (nm1 .NE. 0) THEN !Set first term.
+         IF (nm1 /= 0) THEN !Set first term.
             expint = 1.0_dp/nm1
          ELSE
             expint = -LOG(x) - euler
@@ -1436,7 +1444,7 @@ CONTAINS
          fact = 1.0_dp
          DO i = 1, MAXIT
             fact = -fact*x/i
-            IF (i .NE. nm1) THEN
+            IF (i /= nm1) THEN
                del = -fact/(i - nm1)
             ELSE
                psi = -euler !Compute I(n).
@@ -1446,7 +1454,7 @@ CONTAINS
                del = fact*(-LOG(x) + psi)
             END IF
             expint = expint + del
-            IF (ABS(del) .LT. ABS(expint)*EPS) RETURN
+            IF (ABS(del) < ABS(expint)*EPS) RETURN
          END DO
          CPABORT("series failed in expint")
       END IF
@@ -1535,7 +1543,7 @@ CONTAINS
                g = 100.0_dp*ABS(apq)
                IF (tresh < ABS(apq)) THEN
                   h = diq - dip
-                  IF ((ABS(h) + g) .NE. ABS(h)) THEN
+                  IF ((ABS(h) + g) /= ABS(h)) THEN
                      theta = 0.5_dp*h/apq
                      t = 1.0_dp/(ABS(theta) + SQRT(1.0_dp + theta**2))
                      IF (theta < 0.0_dp) t = -t
@@ -1705,7 +1713,7 @@ CONTAINS
          delta_r = f0/fprime0
          r0 = r0 - delta_r
          CALL eval_transc_func(r0, eps, omg, f0, fprime0)
-         IF (ABS(delta_r) .LT. abstol .OR. ABS(f0) .LT. soltol) EXIT
+         IF (ABS(delta_r) < abstol .OR. ABS(f0) < soltol) EXIT
       END DO
       CPASSERT(iter <= itermax)
       r_cutoff = r0
@@ -1812,5 +1820,300 @@ CONTAINS
 
       DEALLOCATE (matrix_c, eigenvalues)
    END SUBROUTINE diag_antisym
+! **************************************************************************************************
+!> \brief Square array multiplication via LAPACK routines, leaves inputs unchanged
+!> \param A_in Input matrix 1
+!> \param A_trans 'N' - no transpose, 'T' - transpose, 'C' - hermitian conj. of matrix 1
+!> \param B_in Input matrix 2
+!> \param B_trans 'N' - no transpose, 'T' - transpose, 'C' - hermitian conj. of matrix 2
+!> \param C_out Output matrix
+!> \par History
+!>    11.2025 created [Stepan Marek]
+! **************************************************************************************************
+   SUBROUTINE zgemm_square_2(A_in, A_trans, B_in, B_trans, C_out)
+      COMPLEX(kind=dp), DIMENSION(:, :), INTENT(IN)      :: A_in
+      CHARACTER, INTENT(IN)                              :: A_trans
+      COMPLEX(kind=dp), DIMENSION(:, :), INTENT(IN)      :: B_in
+      CHARACTER, INTENT(IN)                              :: B_trans
+      COMPLEX(kind=dp), DIMENSION(:, :), INTENT(INOUT)   :: C_out
+
+      CHARACTER(len=*), PARAMETER                        :: routineN = 'zgemm_square_2'
+
+      INTEGER                                            :: handle, n
+
+      n = SIZE(A_in, 1)
+      IF (n /= SIZE(A_in, 2)) CPABORT("Non-square array 1 (A).")
+      IF (n /= SIZE(B_in, 1)) CPABORT("Incompatible (rows) array 2 (B).")
+      IF (n /= SIZE(B_in, 2)) CPABORT("Non-square array 2 (B).")
+      IF (n /= SIZE(C_out, 1)) CPABORT("Incompatible (rows) result array 3 (C).")
+      IF (n /= SIZE(C_out, 2)) CPABORT("Incompatible (cols) result array 3 (C).")
+      IF (.NOT. (A_trans == 'N' .OR. A_trans == 'n' .OR. &
+                 A_trans == 'T' .OR. A_trans == 't' .OR. &
+                 A_trans == 'C' .OR. A_trans == 'c')) &
+         CPABORT("Unknown transpose character for array 1 (A).")
+      IF (.NOT. (B_trans == 'N' .OR. B_trans == 'n' .OR. &
+                 B_trans == 'T' .OR. B_trans == 't' .OR. &
+                 B_trans == 'C' .OR. B_trans == 'c')) &
+         CPABORT("Unknown transpose character for array 2 (B).")
+
+      CALL timeset(routineN, handle)
+
+      CALL ZGEMM(A_trans, B_trans, n, n, n, z_one, A_in, n, B_in, n, z_zero, C_out, n)
+
+      CALL timestop(handle)
+
+   END SUBROUTINE zgemm_square_2
+! **************************************************************************************************
+!> \brief Square array multiplication via LAPACK routines, leaves inputs unchanged, real matrices
+!> \param A_in Input matrix 1
+!> \param A_trans 'N' - no transpose, 'T' - transpose, 'C' - hermitian conj. of matrix 1
+!> \param B_in Input matrix 2
+!> \param B_trans 'N' - no transpose, 'T' - transpose, 'C' - hermitian conj. of matrix 2
+!> \param C_out Output matrix
+!> \par History
+!>    11.2025 created [Stepan Marek]
+! **************************************************************************************************
+   SUBROUTINE dgemm_square_2(A_in, A_trans, B_in, B_trans, C_out)
+      REAL(kind=dp), DIMENSION(:, :), INTENT(IN)         :: A_in
+      CHARACTER, INTENT(IN)                              :: A_trans
+      REAL(kind=dp), DIMENSION(:, :), INTENT(IN)         :: B_in
+      CHARACTER, INTENT(IN)                              :: B_trans
+      REAL(kind=dp), DIMENSION(:, :), INTENT(INOUT)      :: C_out
+
+      CHARACTER(len=*), PARAMETER                        :: routineN = 'dgemm_square_2'
+
+      INTEGER                                            :: handle, n
+
+      n = SIZE(A_in, 1)
+      IF (n /= SIZE(A_in, 2)) CPABORT("Non-square array 1 (A).")
+      IF (n /= SIZE(B_in, 1)) CPABORT("Incompatible (rows) array 2 (B).")
+      IF (n /= SIZE(B_in, 2)) CPABORT("Non-square array 2 (B).")
+      IF (n /= SIZE(C_out, 1)) CPABORT("Incompatible (rows) result array 3 (C).")
+      IF (n /= SIZE(C_out, 2)) CPABORT("Incompatible (cols) result array 3 (C).")
+      IF (.NOT. (A_trans == 'N' .OR. A_trans == 'n' .OR. &
+                 A_trans == 'T' .OR. A_trans == 't' .OR. &
+                 A_trans == 'C' .OR. A_trans == 'c')) &
+         CPABORT("Unknown transpose character for array 1 (A).")
+      IF (.NOT. (B_trans == 'N' .OR. B_trans == 'n' .OR. &
+                 B_trans == 'T' .OR. B_trans == 't' .OR. &
+                 B_trans == 'C' .OR. B_trans == 'c')) &
+         CPABORT("Unknown transpose character for array 2 (B).")
+
+      CALL timeset(routineN, handle)
+
+      CALL DGEMM(A_trans, B_trans, n, n, n, 1.0_dp, A_in, n, B_in, n, 0.0_dp, C_out, n)
+
+      CALL timestop(handle)
+
+   END SUBROUTINE dgemm_square_2
+! **************************************************************************************************
+!> \brief Square array multiplication via LAPACK routines, leaves inputs unchanged, for 3 matrices
+!> \param A_in Input matrix 1
+!> \param A_trans 'N' - no transpose, 'T' - transpose, 'C' - hermitian conj. of matrix 1
+!> \param B_in Input matrix 2
+!> \param B_trans 'N' - no transpose, 'T' - transpose, 'C' - hermitian conj. of matrix 2
+!> \param C_in Input matrix 3
+!> \param C_trans 'N' - no transpose, 'T' - transpose, 'C' - hermitian conj. of matrix 3
+!> \param D_out Output matrix
+!> \par History
+!>    11.2025 created [Stepan Marek]
+! **************************************************************************************************
+   SUBROUTINE zgemm_square_3(A_in, A_trans, B_in, B_trans, C_in, C_trans, D_out)
+      COMPLEX(kind=dp), DIMENSION(:, :), INTENT(IN)      :: A_in
+      CHARACTER, INTENT(IN)                              :: A_trans
+      COMPLEX(kind=dp), DIMENSION(:, :), INTENT(IN)      :: B_in
+      CHARACTER, INTENT(IN)                              :: B_trans
+      COMPLEX(kind=dp), DIMENSION(:, :), INTENT(IN)      :: C_in
+      CHARACTER, INTENT(IN)                              :: C_trans
+      COMPLEX(kind=dp), DIMENSION(:, :), INTENT(INOUT)   :: D_out
+
+      CHARACTER(len=*), PARAMETER                        :: routineN = 'zgemm_square_3'
+
+      COMPLEX(kind=dp), ALLOCATABLE, DIMENSION(:, :)     :: work
+      INTEGER                                            :: handle, n
+
+      n = SIZE(A_in, 1)
+      IF (n /= SIZE(A_in, 2)) CPABORT("Non-square array 1 (A).")
+      IF (n /= SIZE(B_in, 1)) CPABORT("Incompatible (rows) array 2 (B).")
+      IF (n /= SIZE(B_in, 2)) CPABORT("Non-square array 2 (B).")
+      IF (n /= SIZE(C_in, 1)) CPABORT("Incompatible (rows) array 3 (C).")
+      IF (n /= SIZE(C_in, 2)) CPABORT("Non-square array 3 (C).")
+      IF (n /= SIZE(D_out, 1)) CPABORT("Incompatible (rows) result array 4 (D).")
+      IF (n /= SIZE(D_out, 2)) CPABORT("Incompatible (cols) result array 4 (D).")
+      IF (.NOT. (A_trans == 'N' .OR. A_trans == 'n' .OR. &
+                 A_trans == 'T' .OR. A_trans == 't' .OR. &
+                 A_trans == 'C' .OR. A_trans == 'c')) &
+         CPABORT("Unknown transpose character for array 1 (A).")
+      IF (.NOT. (B_trans == 'N' .OR. B_trans == 'n' .OR. &
+                 B_trans == 'T' .OR. B_trans == 't' .OR. &
+                 B_trans == 'C' .OR. B_trans == 'c')) &
+         CPABORT("Unknown transpose character for array 2 (B).")
+      IF (.NOT. (C_trans == 'N' .OR. C_trans == 'n' .OR. &
+                 C_trans == 'T' .OR. C_trans == 't' .OR. &
+                 C_trans == 'C' .OR. C_trans == 'c')) &
+         CPABORT("Unknown transpose character for array 3 (C).")
+
+      CALL timeset(routineN, handle)
+
+      ALLOCATE (work(n, n), source=z_zero)
+
+      CALL ZGEMM(A_trans, B_trans, n, n, n, z_one, A_in, n, B_in, n, z_zero, work, n)
+      CALL ZGEMM('N', C_trans, n, n, n, z_one, work, n, C_in, n, z_zero, D_out, n)
+
+      DEALLOCATE (work)
+
+      CALL timestop(handle)
+
+   END SUBROUTINE zgemm_square_3
+! **************************************************************************************************
+!> \brief Square array multiplication via LAPACK routines, leaves inputs unchanged, for 3 matrices
+!> \param A_in Input matrix 1
+!> \param A_trans 'N' - no transpose, 'T' - transpose, 'C' - hermitian conj. of matrix 1
+!> \param B_in Input matrix 2
+!> \param B_trans 'N' - no transpose, 'T' - transpose, 'C' - hermitian conj. of matrix 2
+!> \param C_in Input matrix 3
+!> \param C_trans 'N' - no transpose, 'T' - transpose, 'C' - hermitian conj. of matrix 3
+!> \param D_out Output matrix
+!> \par History
+!>    11.2025 created [Stepan Marek]
+! **************************************************************************************************
+   SUBROUTINE dgemm_square_3(A_in, A_trans, B_in, B_trans, C_in, C_trans, D_out)
+      REAL(kind=dp), DIMENSION(:, :), INTENT(IN)         :: A_in
+      CHARACTER, INTENT(IN)                              :: A_trans
+      REAL(kind=dp), DIMENSION(:, :), INTENT(IN)         :: B_in
+      CHARACTER, INTENT(IN)                              :: B_trans
+      REAL(kind=dp), DIMENSION(:, :), INTENT(IN)         :: C_in
+      CHARACTER, INTENT(IN)                              :: C_trans
+      REAL(kind=dp), DIMENSION(:, :), INTENT(INOUT)      :: D_out
+
+      CHARACTER(len=*), PARAMETER                        :: routineN = 'dgemm_square_3'
+
+      INTEGER                                            :: handle, n
+      REAL(kind=dp), ALLOCATABLE, DIMENSION(:, :)        :: work
+
+      n = SIZE(A_in, 1)
+      IF (n /= SIZE(A_in, 2)) CPABORT("Non-square array 1 (A).")
+      IF (n /= SIZE(B_in, 1)) CPABORT("Incompatible (rows) array 2 (B).")
+      IF (n /= SIZE(B_in, 2)) CPABORT("Non-square array 2 (B).")
+      IF (n /= SIZE(C_in, 1)) CPABORT("Incompatible (rows) array 3 (C).")
+      IF (n /= SIZE(C_in, 2)) CPABORT("Non-square array 3 (C).")
+      IF (n /= SIZE(D_out, 1)) CPABORT("Incompatible (rows) result array 4 (D).")
+      IF (n /= SIZE(D_out, 2)) CPABORT("Incompatible (cols) result array 4 (D).")
+      IF (.NOT. (A_trans == 'N' .OR. A_trans == 'n' .OR. &
+                 A_trans == 'T' .OR. A_trans == 't' .OR. &
+                 A_trans == 'C' .OR. A_trans == 'c')) &
+         CPABORT("Unknown transpose character for array 1 (A).")
+      IF (.NOT. (B_trans == 'N' .OR. B_trans == 'n' .OR. &
+                 B_trans == 'T' .OR. B_trans == 't' .OR. &
+                 B_trans == 'C' .OR. B_trans == 'c')) &
+         CPABORT("Unknown transpose character for array 2 (B).")
+      IF (.NOT. (C_trans == 'N' .OR. C_trans == 'n' .OR. &
+                 C_trans == 'T' .OR. C_trans == 't' .OR. &
+                 C_trans == 'C' .OR. C_trans == 'c')) &
+         CPABORT("Unknown transpose character for array 3 (C).")
+
+      CALL timeset(routineN, handle)
+
+      ALLOCATE (work(n, n), source=0.0_dp)
+
+      CALL DGEMM(A_trans, B_trans, n, n, n, 1.0_dp, A_in, n, B_in, n, 0.0_dp, work, n)
+      CALL DGEMM('N', C_trans, n, n, n, 1.0_dp, work, n, C_in, n, 0.0_dp, D_out, n)
+
+      DEALLOCATE (work)
+
+      CALL timestop(handle)
+
+   END SUBROUTINE dgemm_square_3
+
+! **************************************************************************************************
+!> \brief Solve the generalized eigenvalue equation for complex matrices A*v = B*v*λ
+!> \param A_in ...
+!> \param B_in ...
+!> \param eigenvalues ...
+!> \param eigenvectors ...
+!> \author Shridhar Shanbhag
+! **************************************************************************************************
+   SUBROUTINE geeig_right(A_in, B_in, eigenvalues, eigenvectors)
+      COMPLEX(kind=dp), DIMENSION(:, :), INTENT(IN)      :: A_in, B_in
+      REAL(KIND=dp), DIMENSION(:), INTENT(OUT)           :: eigenvalues
+      COMPLEX(KIND=dp), DIMENSION(:, :), INTENT(OUT)     :: eigenvectors
+
+      CHARACTER(len=*), PARAMETER                        :: routineN = 'geeig_right'
+      COMPLEX(KIND=dp), PARAMETER :: cone = CMPLX(1.0_dp, 0.0_dp, KIND=dp), &
+         czero = CMPLX(0.0_dp, 0.0_dp, KIND=dp)
+
+      COMPLEX(KIND=dp), ALLOCATABLE, DIMENSION(:)        :: cevals
+      COMPLEX(kind=dp), ALLOCATABLE, DIMENSION(:, :)     :: A, B, work
+      INTEGER                                            :: handle, i, icol, irow, lda, ldb, ldc, &
+                                                            nao, nc, ncol, nmo, nx
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: evals
+
+      CALL timeset(routineN, handle)
+
+      ! Test sizes
+      nao = SIZE(A_in, 1)
+      nmo = SIZE(eigenvalues)
+      ALLOCATE (evals(nao), cevals(nao))
+      ALLOCATE (work(nao, nao), B(nao, nao), A(nao, nao))
+      A(:, :) = A_in(:, :)
+      B(:, :) = B_in(:, :)
+
+      ! Diagonalize -S matrix, this way the NULL space is at the end of the spectrum
+      B = -B
+      CALL diag_complex(B, work, evals)
+      evals(:) = -evals(:)
+      nc = nao
+      DO i = 1, nao
+         IF (evals(i) < -1.0_dp) THEN
+            nc = i - 1
+            EXIT
+         END IF
+      END DO
+      CPASSERT(nc /= 0)
+
+      IF (nc /= nao) THEN
+         IF (nc < nmo) THEN
+            ! Copy NULL space definition to last vectors of eigenvectors (if needed)
+            ncol = nmo - nc
+            CALL zcopy(ncol*nao, work(1, nc + 1), 1, eigenvectors(1, nc + 1), 1)
+         END IF
+         ! Set NULL space in eigenvector matrix of S to zero
+         DO icol = nc + 1, nao
+            DO irow = 1, nao
+               work(irow, icol) = czero
+            END DO
+         END DO
+         ! Set small eigenvalues to a dummy save value
+         evals(nc + 1:nao) = 1.0_dp
+      END IF
+      ! Calculate U*s**(-1/2)
+      cevals(:) = CMPLX(1.0_dp/SQRT(evals(:)), 0.0_dp, KIND=dp)
+      DO i = 1, MIN(SIZE(work, 2), SIZE(cevals))
+         CALL zscal(MIN(SIZE(work, 2), SIZE(cevals)), cevals(i), work(1, i), 1)
+      END DO
+      ! Reduce to get U^(-C) * H * U^(-1)
+      CALL gemm_square(work, 'C', A, 'N', B)
+      CALL gemm_square(B, 'N', work, 'N', A)
+      IF (nc /= nao) THEN
+         ! set diagonal values to save large value
+         DO icol = nc + 1, nao
+            A(icol, icol) = 10000*cone
+         END DO
+      END IF
+      ! Diagonalize
+      CALL diag_complex(A, B, evals)
+      eigenvalues(1:nmo) = evals(1:nmo)
+      nx = MIN(nc, nmo)
+      ! Restore vectors C = U^(-1) * C*
+      lda = SIZE(work, 1)
+      ldb = SIZE(B, 1)
+      ldc = SIZE(eigenvectors, 1)
+      CALL ZGEMM("N", "N", nao, nx, nc, cone, work, &
+                 lda, B, ldb, czero, eigenvectors, ldc)
+
+      DEALLOCATE (evals, cevals, work, B, A)
+
+      CALL timestop(handle)
+   END SUBROUTINE geeig_right
 
 END MODULE mathlib

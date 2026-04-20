@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -89,7 +89,7 @@ CONTAINS
       INTEGER, INTENT(IN)                                :: iw
 
       CHARACTER(LEN=1), DIMENSION(0:7), PARAMETER :: &
-         label = (/"S", "P", "D", "F", "G", "H", "I", "K"/)
+         label = ["S", "P", "D", "F", "G", "H", "I", "K"]
 
       INTEGER                                            :: j, l, mc, mlc, mlo, mm(0:lmat), mo
 
@@ -510,7 +510,6 @@ CONTAINS
       INTEGER, INTENT(IN)                                :: iw
 
       CHARACTER(len=160)                                 :: shortform
-      CHARACTER(LEN=20)                                  :: tmpStr
       CHARACTER(len=:), ALLOCATABLE                      :: reference
       INTEGER                                            :: ifun, il, meth, myfun, reltyp
       LOGICAL                                            :: lsd
@@ -600,8 +599,6 @@ CONTAINS
       lsd = (meth == do_uks_atom)
 
       IF (myfun /= xc_none) THEN
-         CALL section_vals_val_get(xc_section, "FUNCTIONAL_ROUTINE", c_val=tmpStr)
-         IF (iw > 0) WRITE (iw, fmt="(' FUNCTIONAL| ROUTINE=',a)") TRIM(tmpStr)
          CALL xc_functionals_expand(xc_fun_section, xc_section)
          IF (iw > 0) THEN
             ifun = 0
@@ -688,6 +685,22 @@ CONTAINS
                END DO
             END IF
          END DO
+         IF (potential%gth_pot%soc) THEN
+            WRITE (iw, '(T10,A)') " Spin-orbit coupling parameters "
+            DO l = 1, lmat
+               IF (potential%gth_pot%nl(l) > 0) THEN
+                  WRITE (iw, '(T10,A,T76,I5)') " Angular momentum ", l
+                  WRITE (iw, '(T10,A,T66,F15.6)') " Rcnl ", potential%gth_pot%rcnl(l)
+                  WRITE (iw, '(T10,A,T76,I5)') " Nl ", potential%gth_pot%nl(l)
+                  WRITE (pline, '(5F12.6)') (potential%gth_pot%knl(1, j, l), j=1, potential%gth_pot%nl(l))
+                  WRITE (iw, '(T10,A,T21,A60)') " Hnl ", ADJUSTR(pline)
+                  DO i = 2, potential%gth_pot%nl(l)
+                     WRITE (pline, '(T21,5F12.6)') (potential%gth_pot%knl(i, j, l), j=i, potential%gth_pot%nl(l))
+                     WRITE (iw, '(T21,A60)') ADJUSTR(pline)
+                  END DO
+               END IF
+            END DO
+         END IF
       CASE (upf_pseudo)
          WRITE (iw, '(/," ",29("*"),A,29("*"))') " UPF Pseudopotential "
          DO k = 1, potential%upf_pot%maxinfo
@@ -741,14 +754,16 @@ CONTAINS
 !> \brief Print GTH pseudo-potential parameters.
 !> \param gthpot  pseudo-potential
 !> \param iunit   output file unit
+!> \param fopt ...
 !> \par History
 !>    * 09.2012 created [Juerg Hutter]
 !> \note  The pseudo-potential is written into the 'iunit' file unit or as the file 'GTH-PARAMETER'
 !>        inside the current working directory if the I/O unit is not given explicitly.
 ! **************************************************************************************************
-   SUBROUTINE atom_write_pseudo_param(gthpot, iunit)
+   SUBROUTINE atom_write_pseudo_param(gthpot, iunit, fopt)
       TYPE(atom_gthpot_type), INTENT(INOUT)              :: gthpot
       INTEGER, INTENT(IN), OPTIONAL                      :: iunit
+      REAL(KIND=dp), INTENT(IN), OPTIONAL                :: fopt
 
       INTEGER                                            :: i, iw, j, k, n
 
@@ -757,7 +772,11 @@ CONTAINS
       ELSE
          CALL open_file(file_name="GTH-PARAMETER", file_status="UNKNOWN", file_action="WRITE", unit_number=iw)
       END IF
-      WRITE (iw, '(A2,A)') gthpot%symbol, ADJUSTL(TRIM(gthpot%pname))
+      IF (PRESENT(fopt)) THEN
+         WRITE (iw, '(A,F30.8)') "# "//TRIM(ADJUSTL(gthpot%symbol)), fopt
+      ELSE
+         WRITE (iw, '(A)') TRIM(ADJUSTL(gthpot%symbol))//" "//TRIM(ADJUSTL(gthpot%pname))
+      END IF
       WRITE (iw, '(4I5)') gthpot%econf(0:3)
       WRITE (iw, '(F20.14,I8,5F20.14)') gthpot%rc, gthpot%ncl, (gthpot%cl(i), i=1, gthpot%ncl)
       IF (gthpot%lpotextended) THEN
@@ -803,6 +822,22 @@ CONTAINS
             END DO
          END SELECT
       END DO
+      IF (gthpot%soc) THEN
+         DO i = 1, n - 1
+            WRITE (iw, '(T29,5F20.14)') (gthpot%hnl(1, k, i), k=1, gthpot%nl(i))
+            SELECT CASE (gthpot%nl(i))
+            CASE (2)
+               WRITE (iw, '(T49,F20.14)') gthpot%knl(2, 2, i)
+            CASE (3)
+               WRITE (iw, '(T49,2F20.14)') gthpot%knl(2, 2, i), gthpot%knl(2, 3, i)
+               WRITE (iw, '(T69,F20.14)') gthpot%knl(3, 3, i)
+            CASE DEFAULT
+               DO j = 2, gthpot%nl(i)
+                  WRITE (iw, '(T29,5F20.14)') (gthpot%knl(j, k, i), k=j, gthpot%nl(i))
+               END DO
+            END SELECT
+         END DO
+      END IF
       IF (.NOT. PRESENT(iunit)) CALL close_file(unit_number=iw)
 
    END SUBROUTINE atom_write_pseudo_param

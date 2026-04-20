@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -18,7 +18,12 @@ MODULE kpoint_methods
                                               real_to_scaled
    USE cp_blacs_env,                    ONLY: cp_blacs_env_create,&
                                               cp_blacs_env_type
-   USE cp_control_types,                ONLY: dft_control_type
+   USE cp_cfm_types,                    ONLY: cp_cfm_create,&
+                                              cp_cfm_release,&
+                                              cp_cfm_to_fm,&
+                                              cp_cfm_type,&
+                                              cp_fm_to_cfm
+   USE cp_control_types,                ONLY: hairy_probes_type
    USE cp_dbcsr_api,                    ONLY: &
         dbcsr_copy, dbcsr_create, dbcsr_deallocate_matrix, dbcsr_distribution_get, &
         dbcsr_distribution_type, dbcsr_get_block_p, dbcsr_get_info, dbcsr_iterator_blocks_left, &
@@ -34,7 +39,8 @@ MODULE kpoint_methods
    USE cp_fm_struct,                    ONLY: cp_fm_struct_type
    USE cp_fm_types,                     ONLY: &
         copy_info_type, cp_fm_cleanup_copy_general, cp_fm_create, cp_fm_finish_copy_general, &
-        cp_fm_get_info, cp_fm_release, cp_fm_start_copy_general, cp_fm_to_fm, cp_fm_type
+        cp_fm_get_diag, cp_fm_get_info, cp_fm_get_submatrix, cp_fm_release, &
+        cp_fm_start_copy_general, cp_fm_to_fm, cp_fm_type
    USE cp_log_handling,                 ONLY: cp_logger_get_default_io_unit
    USE cryssym,                         ONLY: crys_sym_gen,&
                                               csym_type,&
@@ -42,9 +48,11 @@ MODULE kpoint_methods
                                               print_crys_symmetry,&
                                               print_kp_symmetry,&
                                               release_csym_type
-   USE fermi_utils,                     ONLY: fermikp,&
-                                              fermikp2
-   USE input_constants,                 ONLY: smear_fermi_dirac
+   USE hairy_probes,                    ONLY: probe_occupancy_kp
+   USE input_constants,                 ONLY: smear_fermi_dirac,&
+                                              smear_gaussian,&
+                                              smear_mp,&
+                                              smear_mv
    USE kinds,                           ONLY: dp
    USE kpoint_types,                    ONLY: get_kpoint_info,&
                                               kind_rotmat_type,&
@@ -77,6 +85,8 @@ MODULE kpoint_methods
                                               neighbor_list_iterator_release,&
                                               neighbor_list_set_p_type
    USE scf_control_types,               ONLY: smear_type
+   USE smearing_utils,                  ONLY: Smearkp,&
+                                              Smearkp2
    USE util,                            ONLY: get_limit
 #include "./base/base_uses.f90"
 
@@ -89,7 +99,7 @@ MODULE kpoint_methods
    PUBLIC :: kpoint_initialize, kpoint_env_initialize, kpoint_initialize_mos, kpoint_initialize_mo_set
    PUBLIC :: kpoint_init_cell_index, kpoint_set_mo_occupation
    PUBLIC :: kpoint_density_matrices, kpoint_density_transform
-   PUBLIC :: rskp_transform
+   PUBLIC :: rskp_transform, lowdin_kp_trans
 
 ! **************************************************************************************************
 
@@ -378,9 +388,9 @@ CONTAINS
             ! making sure that the group size divides the npe and the nkp_grp the nkp
             ! in the worst case, there will be no parallelism over kpoints.
             DO igr = npe, 1, -1
-               IF (MOD(npe, igr) .NE. 0) CYCLE
+               IF (MOD(npe, igr) /= 0) CYCLE
                nkp_grp = npe/igr
-               IF (MOD(nkp, nkp_grp) .NE. 0) CYCLE
+               IF (MOD(nkp, nkp_grp) /= 0) CYCLE
                ngr = igr
             END DO
          ELSE IF (kpoint%parallel_group_size == 0) THEN
@@ -670,15 +680,15 @@ CONTAINS
 !> \param kpoint    Kpoint environment
 !> \param sab_nl    Defining neighbour list
 !> \param para_env  Parallel environment
-!> \param dft_control ...
+!> \param nimages   [output]
 ! **************************************************************************************************
-   SUBROUTINE kpoint_init_cell_index(kpoint, sab_nl, para_env, dft_control)
+   SUBROUTINE kpoint_init_cell_index(kpoint, sab_nl, para_env, nimages)
 
       TYPE(kpoint_type), POINTER                         :: kpoint
       TYPE(neighbor_list_set_p_type), DIMENSION(:), &
          POINTER                                         :: sab_nl
       TYPE(mp_para_env_type), POINTER                    :: para_env
-      TYPE(dft_control_type), POINTER                    :: dft_control
+      INTEGER, INTENT(OUT)                               :: nimages
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'kpoint_init_cell_index'
 
@@ -785,11 +795,12 @@ CONTAINS
       kpoint%sab_nl => sab_nl
 
       ! set number of images
-      dft_control%nimages = SIZE(index_to_cell, 2)
+      nimages = SIZE(index_to_cell, 2)
 
       DEALLOCATE (list)
 
       CALL timestop(handle)
+
    END SUBROUTINE kpoint_init_cell_index
 
 ! **************************************************************************************************
@@ -903,20 +914,27 @@ CONTAINS
 !> \brief Given the eigenvalues of all kpoints, calculates the occupation numbers
 !> \param kpoint  Kpoint environment
 !> \param smear   Smearing information
+!> \param probe ...
 ! **************************************************************************************************
-   SUBROUTINE kpoint_set_mo_occupation(kpoint, smear)
+   SUBROUTINE kpoint_set_mo_occupation(kpoint, smear, probe)
 
       TYPE(kpoint_type), POINTER                         :: kpoint
-      TYPE(smear_type), POINTER                          :: smear
+      TYPE(smear_type)                                   :: smear
+      TYPE(hairy_probes_type), DIMENSION(:), OPTIONAL, &
+         POINTER                                         :: probe
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'kpoint_set_mo_occupation'
 
-      INTEGER                                            :: handle, ik, ikpgr, ispin, kplocal, nb, &
-                                                            ne_a, ne_b, nelectron, nkp, nmo, nspin
+      INTEGER                                            :: handle, ik, ikpgr, ispin, kplocal, nao, &
+                                                            nb, ncol_global, ne_a, ne_b, &
+                                                            nelectron, nkp, nmo, nrow_global, nspin
       INTEGER, DIMENSION(2)                              :: kp_range
       REAL(KIND=dp)                                      :: kTS, mu, mus(2), nel
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: smatrix
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :, :)     :: weig, wocc
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :, :, :)  :: icoeff, rcoeff
       REAL(KIND=dp), DIMENSION(:), POINTER               :: eigenvalues, occupation, wkp
+      TYPE(cp_fm_type), POINTER                          :: mo_coeff
       TYPE(kpoint_env_type), POINTER                     :: kp
       TYPE(mo_set_type), POINTER                         :: mo_set
       TYPE(mp_para_env_type), POINTER                    :: para_env_inter_kp
@@ -928,7 +946,7 @@ CONTAINS
       kp => kpoint%kp_env(1)%kpoint_env
       nspin = SIZE(kp%mos, 2)
       mo_set => kp%mos(1, 1)
-      CALL get_mo_set(mo_set, nmo=nmo, nelectron=nelectron)
+      CALL get_mo_set(mo_set, nmo=nmo, nao=nao, nelectron=nelectron)
       ne_a = nelectron
       IF (nspin == 2) THEN
          CALL get_mo_set(kp%mos(1, 2), nmo=nb, nelectron=ne_b)
@@ -937,6 +955,11 @@ CONTAINS
       ALLOCATE (weig(nmo, nkp, nspin), wocc(nmo, nkp, nspin))
       weig = 0.0_dp
       wocc = 0.0_dp
+      IF (PRESENT(probe)) THEN
+         ALLOCATE (rcoeff(nao, nmo, nkp, nspin), icoeff(nao, nmo, nkp, nspin))
+         rcoeff = 0.0_dp !coeff, real part
+         icoeff = 0.0_dp !coeff, imaginary part
+      END IF
       CALL get_kpoint_info(kpoint, kp_range=kp_range)
       kplocal = kp_range(2) - kp_range(1) + 1
       DO ikpgr = 1, kplocal
@@ -946,63 +969,181 @@ CONTAINS
             mo_set => kp%mos(1, ispin)
             CALL get_mo_set(mo_set, eigenvalues=eigenvalues)
             weig(1:nmo, ik, ispin) = eigenvalues(1:nmo)
+            IF (PRESENT(probe)) THEN
+               CALL get_mo_set(mo_set, mo_coeff=mo_coeff)
+               CALL cp_fm_get_info(mo_coeff, &
+                                   nrow_global=nrow_global, &
+                                   ncol_global=ncol_global)
+               ALLOCATE (smatrix(nrow_global, ncol_global))
+               CALL cp_fm_get_submatrix(mo_coeff, smatrix)
+
+               rcoeff(1:nao, 1:nmo, ik, ispin) = smatrix(1:nrow_global, 1:ncol_global)
+
+               DEALLOCATE (smatrix)
+
+               mo_set => kp%mos(2, ispin)
+
+               CALL get_mo_set(mo_set, mo_coeff=mo_coeff)
+               CALL cp_fm_get_info(mo_coeff, &
+                                   nrow_global=nrow_global, &
+                                   ncol_global=ncol_global)
+               ALLOCATE (smatrix(nrow_global, ncol_global))
+               CALL cp_fm_get_submatrix(mo_coeff, smatrix)
+
+               icoeff(1:nao, 1:nmo, ik, ispin) = smatrix(1:nrow_global, 1:ncol_global)
+
+               mo_set => kp%mos(1, ispin)
+
+               DEALLOCATE (smatrix)
+            END IF
          END DO
       END DO
       CALL get_kpoint_info(kpoint, para_env_inter_kp=para_env_inter_kp)
       CALL para_env_inter_kp%sum(weig)
 
+      IF (PRESENT(probe)) THEN
+         CALL para_env_inter_kp%sum(rcoeff)
+         CALL para_env_inter_kp%sum(icoeff)
+      END IF
+
       CALL get_kpoint_info(kpoint, wkp=wkp)
-      IF (smear%do_smear) THEN
-         ! finite electronic temperature
-         SELECT CASE (smear%method)
-         CASE (smear_fermi_dirac)
-            IF (nspin == 1) THEN
-               nel = REAL(nelectron, KIND=dp)
-               CALL Fermikp(wocc(:, :, 1), mus(1), kTS, weig(:, :, 1), nel, wkp, &
-                            smear%electronic_temperature, 2.0_dp)
-            ELSE IF (smear%fixed_mag_mom > 0.0_dp) THEN
-               nel = REAL(ne_a, KIND=dp)
-               CALL Fermikp(wocc(:, :, 1), mus(1), kTS, weig(:, :, 1), nel, wkp, &
-                            smear%electronic_temperature, 1.0_dp)
-               nel = REAL(ne_b, KIND=dp)
-               CALL Fermikp(wocc(:, :, 2), mus(2), kTS, weig(:, :, 2), nel, wkp, &
-                            smear%electronic_temperature, 1.0_dp)
-            ELSE
-               nel = REAL(ne_a, KIND=dp) + REAL(ne_b, KIND=dp)
-               CALL Fermikp2(wocc(:, :, :), mu, kTS, weig(:, :, :), nel, wkp, &
-                             smear%electronic_temperature)
-               kTS = kTS/2._dp
-               mus(1:2) = mu
-            END IF
-         CASE DEFAULT
-            CPABORT("kpoints: Selected smearing not (yet) supported")
-         END SELECT
-      ELSE
-         ! fixed occupations (2/1)
+
+!calling of HP module HERE, before smear
+      IF (PRESENT(probe)) THEN
+         smear%do_smear = .FALSE. !ensures smearing is switched off
+
          IF (nspin == 1) THEN
             nel = REAL(nelectron, KIND=dp)
-            CALL Fermikp(wocc(:, :, 1), mus(1), kTS, weig(:, :, 1), nel, wkp, 0.0_dp, 2.0_dp)
+            CALL probe_occupancy_kp(wocc(:, :, :), mus(1), kTS, weig(:, :, :), rcoeff(:, :, :, :), icoeff(:, :, :, :), 2.0d0, &
+                                    probe, nel, wkp)
          ELSE
-            nel = REAL(ne_a, KIND=dp)
-            CALL Fermikp(wocc(:, :, 1), mus(1), kTS, weig(:, :, 1), nel, wkp, 0.0_dp, 1.0_dp)
-            nel = REAL(ne_b, KIND=dp)
-            CALL Fermikp(wocc(:, :, 2), mus(2), kTS, weig(:, :, 2), nel, wkp, 0.0_dp, 1.0_dp)
+            nel = REAL(ne_a, KIND=dp) + REAL(ne_b, KIND=dp)
+            CALL probe_occupancy_kp(wocc(:, :, :), mu, kTS, weig(:, :, :), rcoeff(:, :, :, :), icoeff(:, :, :, :), 1.0d0, &
+                                    probe, nel, wkp)
+            kTS = kTS/2._dp
+            mus(1:2) = mu
          END IF
-      END IF
-      DO ikpgr = 1, kplocal
-         ik = kp_range(1) + ikpgr - 1
-         kp => kpoint%kp_env(ikpgr)%kpoint_env
-         DO ispin = 1, nspin
-            mo_set => kp%mos(1, ispin)
-            CALL get_mo_set(mo_set, eigenvalues=eigenvalues, occupation_numbers=occupation)
-            eigenvalues(1:nmo) = weig(1:nmo, ik, ispin)
-            occupation(1:nmo) = wocc(1:nmo, ik, ispin)
-            mo_set%kTS = kTS
-            mo_set%mu = mus(ispin)
-         END DO
-      END DO
 
-      DEALLOCATE (weig, wocc)
+         DO ikpgr = 1, kplocal
+            ik = kp_range(1) + ikpgr - 1
+            kp => kpoint%kp_env(ikpgr)%kpoint_env
+            DO ispin = 1, nspin
+               mo_set => kp%mos(1, ispin)
+               CALL get_mo_set(mo_set, eigenvalues=eigenvalues, occupation_numbers=occupation)
+               eigenvalues(1:nmo) = weig(1:nmo, ik, ispin)
+               occupation(1:nmo) = wocc(1:nmo, ik, ispin)
+               mo_set%kTS = kTS
+               mo_set%mu = mus(ispin)
+
+               CALL get_mo_set(mo_set, mo_coeff=mo_coeff)
+               !get smatrix for kpoint_env ikp
+               CALL cp_fm_get_info(mo_coeff, &
+                                   nrow_global=nrow_global, &
+                                   ncol_global=ncol_global)
+               ALLOCATE (smatrix(nrow_global, ncol_global))
+               CALL cp_fm_get_submatrix(mo_coeff, smatrix)
+
+               smatrix(1:nrow_global, 1:ncol_global) = rcoeff(1:nao, 1:nmo, ik, ispin)
+               DEALLOCATE (smatrix)
+
+               mo_set => kp%mos(2, ispin)
+
+               CALL get_mo_set(mo_set, mo_coeff=mo_coeff)
+               !get smatrix for kpoint_env ikp
+               CALL cp_fm_get_info(mo_coeff, &
+                                   nrow_global=nrow_global, &
+                                   ncol_global=ncol_global)
+               ALLOCATE (smatrix(nrow_global, ncol_global))
+               CALL cp_fm_get_submatrix(mo_coeff, smatrix)
+
+               smatrix(1:nrow_global, 1:ncol_global) = icoeff(1:nao, 1:nmo, ik, ispin)
+               DEALLOCATE (smatrix)
+
+               mo_set => kp%mos(1, ispin)
+
+            END DO
+         END DO
+
+         DEALLOCATE (weig, wocc, rcoeff, icoeff)
+
+      END IF
+
+      IF (PRESENT(probe) .EQV. .FALSE.) THEN
+         IF (smear%do_smear) THEN
+            SELECT CASE (smear%method)
+            CASE (smear_fermi_dirac)
+               ! finite electronic temperature
+               IF (nspin == 1) THEN
+                  nel = REAL(nelectron, KIND=dp)
+                  CALL Smearkp(wocc(:, :, 1), mus(1), kTS, weig(:, :, 1), nel, wkp, &
+                               smear%electronic_temperature, 2.0_dp, smear_fermi_dirac)
+               ELSE IF (smear%fixed_mag_mom > 0.0_dp) THEN
+                  nel = REAL(ne_a, KIND=dp)
+                  CALL Smearkp(wocc(:, :, 1), mus(1), kTS, weig(:, :, 1), nel, wkp, &
+                               smear%electronic_temperature, 1.0_dp, smear_fermi_dirac)
+                  nel = REAL(ne_b, KIND=dp)
+                  CALL Smearkp(wocc(:, :, 2), mus(2), kTS, weig(:, :, 2), nel, wkp, &
+                               smear%electronic_temperature, 1.0_dp, smear_fermi_dirac)
+               ELSE
+                  nel = REAL(ne_a, KIND=dp) + REAL(ne_b, KIND=dp)
+                  CALL Smearkp2(wocc(:, :, :), mu, kTS, weig(:, :, :), nel, wkp, &
+                                smear%electronic_temperature, smear_fermi_dirac)
+                  kTS = kTS/2._dp
+                  mus(1:2) = mu
+               END IF
+            CASE (smear_gaussian, smear_mp, smear_mv)
+               IF (nspin == 1) THEN
+                  nel = REAL(nelectron, KIND=dp)
+                  CALL Smearkp(wocc(:, :, 1), mus(1), kTS, weig(:, :, 1), nel, wkp, &
+                               smear%smearing_width, 2.0_dp, smear%method)
+               ELSE IF (smear%fixed_mag_mom > 0.0_dp) THEN
+                  nel = REAL(ne_a, KIND=dp)
+                  CALL Smearkp(wocc(:, :, 1), mus(1), kTS, weig(:, :, 1), nel, wkp, &
+                               smear%smearing_width, 1.0_dp, smear%method)
+                  nel = REAL(ne_b, KIND=dp)
+                  CALL Smearkp(wocc(:, :, 2), mus(2), kTS, weig(:, :, 2), nel, wkp, &
+                               smear%smearing_width, 1.0_dp, smear%method)
+               ELSE
+                  nel = REAL(ne_a, KIND=dp) + REAL(ne_b, KIND=dp)
+                  CALL Smearkp2(wocc(:, :, :), mu, kTS, weig(:, :, :), nel, wkp, &
+                                smear%smearing_width, smear%method)
+                  kTS = kTS/2._dp
+                  mus(1:2) = mu
+               END IF
+            CASE DEFAULT
+               CPABORT("kpoints: Selected smearing not (yet) supported")
+            END SELECT
+         ELSE
+            ! fixed occupations (2/1)
+            IF (nspin == 1) THEN
+               nel = REAL(nelectron, KIND=dp)
+               CALL Smearkp(wocc(:, :, 1), mus(1), kTS, weig(:, :, 1), nel, wkp, &
+                            0.0_dp, 2.0_dp, smear_gaussian)
+            ELSE
+               nel = REAL(ne_a, KIND=dp)
+               CALL Smearkp(wocc(:, :, 1), mus(1), kTS, weig(:, :, 1), nel, wkp, &
+                            0.0_dp, 1.0_dp, smear_gaussian)
+               nel = REAL(ne_b, KIND=dp)
+               CALL Smearkp(wocc(:, :, 2), mus(2), kTS, weig(:, :, 2), nel, wkp, &
+                            0.0_dp, 1.0_dp, smear_gaussian)
+            END IF
+         END IF
+         DO ikpgr = 1, kplocal
+            ik = kp_range(1) + ikpgr - 1
+            kp => kpoint%kp_env(ikpgr)%kpoint_env
+            DO ispin = 1, nspin
+               mo_set => kp%mos(1, ispin)
+               CALL get_mo_set(mo_set, eigenvalues=eigenvalues, occupation_numbers=occupation)
+               eigenvalues(1:nmo) = weig(1:nmo, ik, ispin)
+               occupation(1:nmo) = wocc(1:nmo, ik, ispin)
+               mo_set%kTS = kTS
+               mo_set%mu = mus(ispin)
+            END DO
+         END DO
+
+         DEALLOCATE (weig, wocc)
+
+      END IF
 
       CALL timestop(handle)
 
@@ -1125,6 +1266,93 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE kpoint_density_matrices
+
+! **************************************************************************************************
+!> \brief Calculate Lowdin transformation of density matrix S^1/2 P S^1/2
+!>        Integrate diagonal elements over k-points to get Lowdin charges
+!> \param kpoint    kpoint environment
+!> \param pmat_diag Sum over kpoints of diagonal elements
+!> \par History
+!>      04.2026 created [JGH]
+! **************************************************************************************************
+   SUBROUTINE lowdin_kp_trans(kpoint, pmat_diag)
+
+      TYPE(kpoint_type), POINTER                         :: kpoint
+      REAL(KIND=dp), DIMENSION(:, :), INTENT(INOUT)      :: pmat_diag
+
+      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'lowdin_kp_trans'
+      COMPLEX(KIND=dp), PARAMETER                        :: cone = (1.0_dp, 0.0_dp), &
+                                                            czero = (0.0_dp, 0.0_dp)
+
+      INTEGER                                            :: handle, ikpgr, ispin, kplocal, nao, nspin
+      INTEGER, DIMENSION(2)                              :: kp_range
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:)           :: dele
+      TYPE(cp_cfm_type)                                  :: cf1work, cf2work
+      TYPE(cp_cfm_type), POINTER                         :: cshalf
+      TYPE(cp_fm_struct_type), POINTER                   :: matrix_struct
+      TYPE(cp_fm_type)                                   :: f1work, f2work
+      TYPE(cp_fm_type), POINTER                          :: cpmat, pmat, rpmat, shalf
+      TYPE(kpoint_env_type), POINTER                     :: kp
+      TYPE(mp_para_env_type), POINTER                    :: para_env_inter_kp
+
+      CALL timeset(routineN, handle)
+
+      nspin = SIZE(pmat_diag, 2)
+      pmat_diag = 0.0_dp
+
+      ! work matrix
+      CALL cp_fm_get_info(kpoint%kp_env(1)%kpoint_env%pmat(1, 1), &
+                          matrix_struct=matrix_struct, nrow_global=nao)
+      IF (kpoint%use_real_wfn) THEN
+         CALL cp_fm_create(f1work, matrix_struct, nrow=nao, ncol=nao)
+         CALL cp_fm_create(f2work, matrix_struct, nrow=nao, ncol=nao)
+      ELSE
+         CALL cp_fm_create(f2work, matrix_struct, nrow=nao, ncol=nao)
+         CALL cp_cfm_create(cf1work, matrix_struct, nrow=nao, ncol=nao)
+         CALL cp_cfm_create(cf2work, matrix_struct, nrow=nao, ncol=nao)
+      END IF
+      ALLOCATE (dele(nao))
+
+      CALL get_kpoint_info(kpoint, kp_range=kp_range)
+      kplocal = kp_range(2) - kp_range(1) + 1
+      DO ikpgr = 1, kplocal
+         kp => kpoint%kp_env(ikpgr)%kpoint_env
+         DO ispin = 1, nspin
+            IF (kpoint%use_real_wfn) THEN
+               pmat => kp%pmat(1, ispin)
+               shalf => kp%shalf
+               CALL parallel_gemm("N", "N", nao, nao, nao, 1.0_dp, pmat, shalf, 0.0_dp, f1work)
+               CALL parallel_gemm("N", "N", nao, nao, nao, 1.0_dp, shalf, f1work, 0.0_dp, f2work)
+            ELSE
+               rpmat => kp%pmat(1, ispin)
+               cpmat => kp%pmat(2, ispin)
+               cshalf => kp%cshalf
+               CALL cp_fm_to_cfm(rpmat, cpmat, cf1work)
+               CALL parallel_gemm("N", "N", nao, nao, nao, cone, cf1work, cshalf, czero, cf2work)
+               CALL parallel_gemm("N", "N", nao, nao, nao, cone, cshalf, cf2work, czero, cf1work)
+               CALL cp_cfm_to_fm(cf1work, mtargetr=f2work)
+            END IF
+            CALL cp_fm_get_diag(f2work, dele)
+            pmat_diag(1:nao, ispin) = pmat_diag(1:nao, ispin) + kp%wkp*dele(1:nao)
+         END DO
+      END DO
+
+      CALL get_kpoint_info(kpoint, para_env_inter_kp=para_env_inter_kp)
+      CALL para_env_inter_kp%sum(pmat_diag)
+
+      IF (kpoint%use_real_wfn) THEN
+         CALL cp_fm_release(f1work)
+         CALL cp_fm_release(f2work)
+      ELSE
+         CALL cp_fm_release(f2work)
+         CALL cp_cfm_release(cf1work)
+         CALL cp_cfm_release(cf2work)
+      END IF
+      DEALLOCATE (dele)
+
+      CALL timestop(handle)
+
+   END SUBROUTINE lowdin_kp_trans
 
 ! **************************************************************************************************
 !> \brief generate real space density matrices in DBCSR format

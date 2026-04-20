@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -208,7 +208,7 @@ CONTAINS
       ! band energy
       CALL get_qs_env(qs_env, matrix_ks_kp=matrix_ks)
       CALL qs_rho_get(rho, rho_ao_kp=rho_ao_kp)
-      CALL calculate_ptrace(matrix_ks, rho_ao_kp, eband, nspins)
+      CALL calculate_ptrace(matrix_ks, rho_ao_kp, eband, nspins, .TRUE.)
 
       ! get full density
       CALL pw_copy(band_density, energy_density)
@@ -340,9 +340,9 @@ CONTAINS
          CALL auxbas_pw_pool%create_pw(efield(i))
          CALL pw_copy(v_hartree_gspace, efield(i))
       END DO
-      CALL pw_derive(efield(1), (/1, 0, 0/))
-      CALL pw_derive(efield(2), (/0, 1, 0/))
-      CALL pw_derive(efield(3), (/0, 0, 1/))
+      CALL pw_derive(efield(1), [1, 0, 0])
+      CALL pw_derive(efield(2), [0, 1, 0])
+      CALL pw_derive(efield(3), [0, 0, 1])
       CALL auxbas_pw_pool%give_back_pw(v_hartree_gspace)
       DO i = 1, 3
          CALL auxbas_pw_pool%give_back_pw(efield(i))

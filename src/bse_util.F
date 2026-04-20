@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -178,7 +178,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE mult_B_with_W
 
 ! **************************************************************************************************
 !> \brief Adds and reorders full matrices with a combined index structure, e.g. adding W_ij,ab
@@ -547,13 +547,13 @@ CONTAINS
          ! due to their reversed indexing
          IF (correct_nrow) THEN
             idx_col_first = idx_col_first - nrow_offset + 1
-            IF (idx_col_first .LE. 0) CYCLE
+            IF (idx_col_first <= 0) CYCLE
          ELSE
             IF (idx_col_first > nrow_out) EXIT
          END IF
          IF (correct_ncol) THEN
             idx_col_sec = idx_col_sec - ncol_offset + 1
-            IF (idx_col_sec .LE. 0) CYCLE
+            IF (idx_col_sec <= 0) CYCLE
          ELSE
             IF (idx_col_sec > ncol_out) CYCLE
          END IF
@@ -643,13 +643,13 @@ CONTAINS
          ! due to their reversed indexing
          IF (correct_nrow) THEN
             idx_col_first = idx_col_first - nrow_offset + 1
-            IF (idx_col_first .LE. 0) CYCLE
+            IF (idx_col_first <= 0) CYCLE
          ELSE
             IF (idx_col_first > nrow_out) EXIT
          END IF
          IF (correct_ncol) THEN
             idx_col_sec = idx_col_sec - ncol_offset + 1
-            IF (idx_col_sec .LE. 0) CYCLE
+            IF (idx_col_sec <= 0) CYCLE
          ELSE
             IF (idx_col_sec > ncol_out) CYCLE
          END IF
@@ -840,7 +840,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE comp_eigvec_coeff_BSE
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1030,7 +1030,7 @@ CONTAINS
          END IF
          DO ii = 1, nrow_local
             eigvec_idx = row_indices(ii)
-            eigvec_entry = fm_eigvec%local_data(ii, jj)/SQRT(2.0_dp)
+            eigvec_entry = fm_eigvec%local_data(ii, jj)
             IF (ABS(eigvec_entry) > mp2_env%bse%eps_x) THEN
                num_entries_to_comm(para_env%mepos) = num_entries_to_comm(para_env%mepos) + 1
             END IF
@@ -1059,7 +1059,7 @@ CONTAINS
          END IF
          DO ii = 1, nrow_local
             eigvec_idx = row_indices(ii)
-            eigvec_entry = fm_eigvec%local_data(ii, jj)/SQRT(2.0_dp)
+            eigvec_entry = fm_eigvec%local_data(ii, jj)
             IF (ABS(eigvec_entry) > mp2_env%bse%eps_x) THEN
                buffer_entries(para_env%mepos)%indx(kk, 1) = (eigvec_idx - 1)/virtual + 1
                buffer_entries(para_env%mepos)%indx(kk, 2) = MOD(eigvec_idx - 1, virtual) + 1
@@ -1108,7 +1108,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE filter_eigvec_contrib
 
 ! **************************************************************************************************
 !> \brief Reads cutoffs for BSE from mp2_env and compares to energies in Eigenval to extract
@@ -1141,14 +1141,14 @@ CONTAINS
       ! Determine index in homo and virtual for truncation
       ! Uses indices of outermost orbitals within energy range (-mp2_env%bse%bse_cutoff_occ,mp2_env%bse%bse_cutoff_empty)
       IF (mp2_env%bse%bse_cutoff_occ > 0 .OR. mp2_env%bse%bse_cutoff_empty > 0) THEN
-         IF (-mp2_env%bse%bse_cutoff_occ .LT. Eigenval(1) - Eigenval(homo) &
+         IF (-mp2_env%bse%bse_cutoff_occ < Eigenval(1) - Eigenval(homo) &
              .OR. mp2_env%bse%bse_cutoff_occ < 0) THEN
             homo_red = homo
             homo_incl = 1
          ELSE
             homo_incl = 1
             DO i_homo = 1, homo
-               IF (Eigenval(i_homo) - Eigenval(homo) .GT. -mp2_env%bse%bse_cutoff_occ) THEN
+               IF (Eigenval(i_homo) - Eigenval(homo) > -mp2_env%bse%bse_cutoff_occ) THEN
                   homo_incl = i_homo
                   EXIT
                END IF
@@ -1156,14 +1156,14 @@ CONTAINS
             homo_red = homo - homo_incl + 1
          END IF
 
-         IF (mp2_env%bse%bse_cutoff_empty .GT. Eigenval(homo + virtual) - Eigenval(homo + 1) &
+         IF (mp2_env%bse%bse_cutoff_empty > Eigenval(homo + virtual) - Eigenval(homo + 1) &
              .OR. mp2_env%bse%bse_cutoff_empty < 0) THEN
             virt_red = virtual
             virt_incl = virtual
          ELSE
             virt_incl = homo + 1
             DO j_virt = 1, virtual
-               IF (Eigenval(homo + j_virt) - Eigenval(homo + 1) .GT. mp2_env%bse%bse_cutoff_empty) THEN
+               IF (Eigenval(homo + j_virt) - Eigenval(homo + 1) > mp2_env%bse%bse_cutoff_empty) THEN
                   virt_incl = j_virt - 1
                   EXIT
                END IF
@@ -1179,7 +1179,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE determine_cutoff_indices
 
 ! **************************************************************************************************
 !> \brief Determines indices within the given energy cutoffs and truncates Eigenvalues and matrices
@@ -1280,9 +1280,9 @@ CONTAINS
       CALL cp_fm_struct_create(fm_struct_ij, para_env, context, dimen_RI, homo_red*homo_red)
       CALL cp_fm_struct_create(fm_struct_ab, para_env, context, dimen_RI, virt_red*virt_red)
 
-      CALL cp_fm_create(fm_mat_S_trunc, fm_struct_ia, "fm_S_trunc")
-      CALL cp_fm_create(fm_mat_S_ij_trunc, fm_struct_ij, "fm_S_ij_trunc")
-      CALL cp_fm_create(fm_mat_S_ab_trunc, fm_struct_ab, "fm_S_ab_trunc")
+      CALL cp_fm_create(fm_mat_S_trunc, fm_struct_ia, name="fm_S_trunc", set_zero=.TRUE.)
+      CALL cp_fm_create(fm_mat_S_ij_trunc, fm_struct_ij, name="fm_S_ij_trunc", set_zero=.TRUE.)
+      CALL cp_fm_create(fm_mat_S_ab_trunc, fm_struct_ab, name="fm_S_ab_trunc", set_zero=.TRUE.)
 
       !Copy parts of original matrices to truncated ones
       IF (mp2_env%bse%bse_cutoff_occ > 0 .OR. mp2_env%bse%bse_cutoff_empty > 0) THEN
@@ -1370,11 +1370,11 @@ CONTAINS
       ! (ia,11) to (a1,i1) for transposition
       ! (ia,11) to (i1,a1) for default
       IF (do_transpose) THEN
-         reordering = (/2, 3, 1, 4/)
+         reordering = [2, 3, 1, 4]
          my_n_row = virtual
          my_m_col = homo
       ELSE
-         reordering = (/1, 3, 2, 4/)
+         reordering = [1, 3, 2, 4]
          my_n_row = homo
          my_m_col = virtual
       END IF
@@ -1923,4 +1923,4 @@ CONTAINS
 
    END SUBROUTINE trace_exciton_descr
 
-END MODULE
+END MODULE bse_util

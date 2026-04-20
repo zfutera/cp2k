@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -168,6 +168,7 @@ CONTAINS
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: mcharge
       REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :, :)     :: moments
       REAL(KIND=dp), DIMENSION(:), POINTER               :: occupation_numbers
+      TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_2d_r_p_type), ALLOCATABLE, DIMENSION(:)    :: smat_kind
       TYPE(cp_2d_r_p_type), ALLOCATABLE, DIMENSION(:, :) :: oce_atom
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
@@ -472,6 +473,7 @@ CONTAINS
       IF (molden_iao) THEN
          ! Print basis functions: molden file
          CALL get_qs_env(qs_env=qs_env, qs_kind_set=qs_kind_set)
+         CALL get_qs_env(qs_env, cell=cell)
          CALL get_ks_env(ks_env=ks_env, particle_set=particle_set)
          IF (unit_nr > 0) THEN
             WRITE (unit_nr, '(T2,A)') '  Write IAO in MOLDEN Format'
@@ -486,7 +488,7 @@ CONTAINS
             mo_iao(ispin)%occupation_numbers = 1.0_dp
          END DO
          ! Print IAO basis functions: molden format
-         CALL write_mos_molden(mo_iao, qs_kind_set, particle_set, iao_molden_section)
+         CALL write_mos_molden(mo_iao, qs_kind_set, particle_set, iao_molden_section, cell=cell, qs_env=qs_env)
          DO ispin = 1, nspin
             CALL deallocate_mo_set(mo_iao(ispin))
          END DO
@@ -660,7 +662,7 @@ CONTAINS
                mo_loc(ispin)%occupation_numbers = 1.0_dp
             END DO
             ! Print IBO functions: molden format
-            CALL write_mos_molden(mo_loc, qs_kind_set, particle_set, ibo_molden_section)
+            CALL write_mos_molden(mo_loc, qs_kind_set, particle_set, ibo_molden_section, cell=cell, qs_env=qs_env)
             DO ispin = 1, nspin
                CALL deallocate_mo_set(mo_loc(ispin))
             END DO
@@ -1195,7 +1197,7 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(:, :, :), INTENT(INOUT)   :: moments
 
       CHARACTER(len=*), PARAMETER                        :: routineN = 'center_spread_loc'
-      INTEGER, DIMENSION(6), PARAMETER                   :: list = (/1, 2, 3, 4, 7, 9/)
+      INTEGER, DIMENSION(6), PARAMETER                   :: list = [1, 2, 3, 4, 7, 9]
 
       INTEGER                                            :: handle, i, iop, iorb, ispin, nao, norb, &
                                                             nspin

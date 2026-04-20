@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -72,7 +72,7 @@ MODULE ed_analysis
    USE qs_core_energies,                ONLY: calculate_ecore_alpha,&
                                               calculate_ecore_overlap,&
                                               calculate_ecore_self
-   USE qs_core_hamiltonian,             ONLY: core_matrices
+   USE qs_core_matrices,                ONLY: core_matrices
    USE qs_dispersion_pairpot,           ONLY: calculate_dispersion_pairpot
    USE qs_dispersion_types,             ONLY: qs_dispersion_type
    USE qs_energy_types,                 ONLY: qs_energy_type

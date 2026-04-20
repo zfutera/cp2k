@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -195,7 +195,7 @@ CONTAINS
 
       ! band energy : Tr(PH)
       CALL get_qs_env(qs_env, matrix_ks_kp=matrixkp_ks)
-      CALL calculate_ptrace(matrixkp_ks, rho_ao_kp, energy%band, dft_control%nspins)
+      CALL calculate_ptrace(matrixkp_ks, rho_ao_kp, energy%band, dft_control%nspins, .TRUE.)
       ! core energy : Tr(Ph)
       energy%total = energy%total - energy%core
       CALL get_qs_env(qs_env, matrix_h_kp=matrix_h)

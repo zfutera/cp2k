@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -342,7 +342,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE hfx_ri_pre_scf_mo
 
 ! **************************************************************************************************
 !> \brief ...
@@ -379,7 +379,7 @@ CONTAINS
       END IF
 
       CALL dbcsr_release(matrix_tmp)
-   END SUBROUTINE
+   END SUBROUTINE check_inverse
 
 ! **************************************************************************************************
 !> \brief ...
@@ -429,7 +429,7 @@ CONTAINS
          CALL dbcsr_release(matrix_copy)
       END IF
 
-   END SUBROUTINE
+   END SUBROUTINE check_sqrt
 
 ! **************************************************************************************************
 !> \brief Calculate 2-center and 3-center integrals
@@ -762,7 +762,7 @@ CONTAINS
       END IF
 
       CALL timestop(handle)
-   END SUBROUTINE
+   END SUBROUTINE hfx_ri_pre_scf_calc_tensors
 
 ! **************************************************************************************************
 !> \brief Pre-SCF steps in rho flavor of RI HFX
@@ -951,7 +951,7 @@ CONTAINS
       CALL dbt_copy(ri_data%t_3c_int_ctr_3(1, 1), ri_data%t_3c_int_ctr_2(1, 1), order=[2, 1, 3], move_data=.TRUE.)
 
       CALL timestop(handle)
-   END SUBROUTINE
+   END SUBROUTINE hfx_ri_pre_scf_Pmat
 
 ! **************************************************************************************************
 !> \brief Sorts 2d indices w.r.t. rows and columns
@@ -1022,7 +1022,7 @@ CONTAINS
 
       blk_ind(:, :) = blk_ind_tmp(:nblk, :)
 
-   END SUBROUTINE
+   END SUBROUTINE sort_unique_blkind_2d
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1177,7 +1177,7 @@ CONTAINS
       END IF
 
       CALL timestop(handle)
-   END SUBROUTINE
+   END SUBROUTINE hfx_ri_update_ks
 
 ! **************************************************************************************************
 !> \brief Calculate Fock (AKA Kohn-Sham) matrix in MO flavor
@@ -1524,7 +1524,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE hfx_ri_update_ks_mo
 
 ! **************************************************************************************************
 !> \brief Calculate Fock (AKA Kohn-Sham) matrix in rho flavor
@@ -1718,8 +1718,8 @@ CONTAINS
          CALL dbt_batched_contract_finalize(ri_data%t_3c_int_ctr_1(1, 1))
          CALL dbt_batched_contract_finalize(t_3c_3)
 
-         DO i_mem = 1, n_mem
-            DO j_mem = 1, n_mem_RI
+         DO j_mem = 1, n_mem_RI
+            DO i_mem = 1, n_mem
                ASSOCIATE (blk_indices => ri_data%blk_indices(i_mem, j_mem), t_3c => ri_data%t_3c_int_ctr_1(1, 1))
                   CALL decompress_tensor(tensor_old, blk_indices%ind, &
                                          ri_data%store_3c(i_mem, j_mem), ri_data%filter_eps_storage)
@@ -1774,7 +1774,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE
+   END SUBROUTINE hfx_ri_update_ks_Pmat
 
 ! **************************************************************************************************
 !> \brief Implementation based on the MO flavor
@@ -4062,11 +4062,11 @@ CONTAINS
          CALL dbt_iterator_next_block(iter, ind)
          CALL dbt_get_block(rho_ao_t, ind, blk, found)
          IF (found) THEN
-!$OMP CRITICAL
+!$OMP CRITICAL(omp_get_RI_density_coeffs)
             nblks = nblks + 1
             idx1(nblks) = ind(1)
             idx2(nblks) = ind(2)
-!$OMP END CRITICAL
+!$OMP END CRITICAL(omp_get_RI_density_coeffs)
             DEALLOCATE (blk)
          END IF
       END DO
@@ -4090,9 +4090,9 @@ CONTAINS
          IF (found) THEN
             ALLOCATE (blk_3d(SIZE(blk, 1), SIZE(blk, 2), 1))
             blk_3d(:, :, 1) = blk(:, :)
-!$OMP CRITICAL
+!$OMP CRITICAL(omp_get_RI_density_coeffs)
             CALL dbt_put_block(rho_ao_t_3d, [ind(1), ind(2), 1], [SIZE(blk, 1), SIZE(blk, 2), 1], blk_3d)
-!$OMP END CRITICAL
+!$OMP END CRITICAL(omp_get_RI_density_coeffs)
             DEALLOCATE (blk, blk_3d)
          END IF
       END DO
@@ -4202,9 +4202,9 @@ CONTAINS
          IF (found) THEN
 
             idx = SUM(ri_data%bsizes_RI_split(1:ind(1) - 1))
-!$OMP CRITICAL
+!$OMP CRITICAL(omp_get_RI_density_coeffs)
             density_coeffs(idx + 1:idx + ri_data%bsizes_RI_split(ind(1))) = blk(:, 1)
-!$OMP END CRITICAL
+!$OMP END CRITICAL(omp_get_RI_density_coeffs)
             DEALLOCATE (blk)
          END IF
       END DO
@@ -4246,7 +4246,7 @@ CONTAINS
       DO iblk = 1, SIZE(bsizes_split)
          split_sum = split_sum + bsizes_split(iblk)
 
-         IF (split_sum .GT. full_sum) THEN
+         IF (split_sum > full_sum) THEN
             iat = iat + 1
             full_sum = full_sum + bsizes_orig(iat)
          END IF
@@ -4266,7 +4266,7 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(SIZE(values))             :: my_sqrt
 
       my_sqrt = SQRT(values)
-   END FUNCTION
+   END FUNCTION my_sqrt
 
 ! **************************************************************************************************
 !> \brief Function for calculation inverse sqrt of a matrix
@@ -4278,5 +4278,5 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(SIZE(values))             :: my_invsqrt
 
       my_invsqrt = SQRT(1.0_dp/values)
-   END FUNCTION
-END MODULE
+   END FUNCTION my_invsqrt
+END MODULE hfx_ri

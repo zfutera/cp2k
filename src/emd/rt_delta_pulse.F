@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -357,7 +357,7 @@ CONTAINS
 
          DO idir = 1, 3
             factor = kvec(idir)
-            IF (factor .NE. 0.0_dp) THEN
+            IF (factor /= 0.0_dp) THEN
                IF (.NOT. len_rep) THEN
                   CALL cp_dbcsr_sm_fm_multiply(matrix_s(idir + 1)%matrix, mos_old(2*ispin - 1), &
                                                mos_old(2*ispin), ncol=nmo)
@@ -633,7 +633,7 @@ CONTAINS
 
          DO idir = 1, 3
             factor = kvec(idir)
-            IF (factor .NE. 0.0_dp) THEN
+            IF (factor /= 0.0_dp) THEN
                CALL cp_dbcsr_sm_fm_multiply(matrix_mag(idir)%matrix, mos_old(2*ispin - 1), &
                                             mos_old(2*ispin), ncol=nmo)
                CALL cp_fm_scale_and_add(1.0_dp, mos_new(2*ispin - 1), factor, mos_old(2*ispin))

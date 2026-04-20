@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -65,9 +65,9 @@ MODULE pao_types
       CHARACTER(LEN=default_string_length)      :: prim_basis_name = ""
       INTEGER                                   :: prim_basis_size = -1
       INTEGER                                   :: pao_basis_size = -1
-      INTEGER                                   :: num_neighbors = -1
+      INTEGER                                   :: num_layers = -1
       REAL(dp)                                  :: cutoff = 0.0_dp
-      INTEGER, DIMENSION(:), ALLOCATABLE        :: feature_kinds
+      INTEGER, DIMENSION(:), ALLOCATABLE        :: kinds_mapping
       INTEGER(kind=omp_lock_kind)               :: lock = -1
    END TYPE pao_model_type
 
@@ -168,6 +168,7 @@ MODULE pao_types
       INTEGER                          :: optimizer = -1
       INTEGER                          :: cg_init_steps = -1
       LOGICAL                          :: precondition = .FALSE.
+      LOGICAL                          :: ignore_convergence_failure = .FALSE.
       CHARACTER(LEN=default_path_length) :: preopt_dm_file = ""
       CHARACTER(LEN=default_path_length) :: restart_file = ""
       TYPE(filename_type), DIMENSION(:), ALLOCATABLE :: ml_training_set
@@ -226,7 +227,7 @@ MODULE pao_types
          DIMENSION(:)                  :: models
 
       TYPE(dbcsr_distribution_type)     :: diag_distribution
-   END TYPE
+   END TYPE pao_env_type
 
 CONTAINS
 

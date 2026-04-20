@@ -125,7 +125,6 @@ developing applications that use %{name}.
 %prep
 %autosetup -p1
 rm tools/build_utils/fypp
-rm -r exts/dbcsr
 
 # $MPI_SUFFIX will be evaluated in the loops below, set by mpi modules
 %global _vpath_builddir %{_vendor}-%{_target_os}-build${MPI_SUFFIX:-_serial}
@@ -134,46 +133,37 @@ rm -r exts/dbcsr
 %build
 cmake_common_args=(
   "-G Ninja"
-  "-DCP2K_DEBUG_MODE:BOOL=OFF"
+  "-DCMAKE_BUILD_TYPE:STRING=Generic"
   "-DCP2K_BLAS_VENDOR:STRING=FlexiBLAS"
+  "-DCP2K_USE_EVERYTHING:BOOL=OFF"
   "-DCP2K_USE_STATIC_BLAS:BOOL=OFF"
   # Dependencies equivalent with Default
-  "-DCP2K_USE_COSMA:BOOL=OFF"  # Not packaged
-  "-DCP2K_USE_DEEPMD:BOOL=OFF"
-  "-DCP2K_USE_DFTD4:BOOL=OFF"
-  "-DCP2K_USE_DLAF:BOOL=OFF"
-  "-DCP2K_USE_ELPA:BOOL=OFF"
   "-DCP2K_USE_FFTW3:BOOL=ON"
-  "-DCP2K_USE_GREENX:BOOL=OFF"
-  "-DCP2K_USE_GRPP:BOOL=OFF"
-  "-DCP2K_USE_HDF5:BOOL=OFF"
-  "-DCP2K_USE_LIBINT2:BOOL=OFF"  # Detection is broken
-  "-DCP2K_USE_LIBSMEAGOL:BOOL=OFF"
-  "-DCP2K_USE_LIBTORCH:BOOL=OFF"
+  "-DCP2K_USE_LIBINT2:BOOL=OFF" # Package has no Fortran interface
   "-DCP2K_USE_LIBXC:BOOL=ON"
-  "-DCP2K_USE_LIBXSMM:BOOL=%{?with_libxsmm:ON}%{?without_libxsmm:OFF}"
-  "-DCP2K_USE_PLUMED:BOOL=OFF"
-  "-DCP2K_USE_SIRIUS:BOOL=OFF"
   "-DCP2K_USE_SPGLIB:BOOL=ON"
-  "-DCP2K_USE_SPLA:BOOL=OFF"
-  "-DCP2K_USE_TREXIO:BOOL=OFF"
-  "-DCP2K_USE_VORI:BOOL=OFF"
+  %if %{with libxsmm}
+  "-DCP2K_USE_LIBXSMM:BOOL=ON"
+  %else
+  "-DCP2K_USE_LIBXSMM:BOOL=OFF"
+  %endif
 )
 for mpi in '' mpich openmpi; do
   if [ -n "$mpi" ]; then
     module load mpi/${mpi}-%{_arch}
     cmake_mpi_args=(
       "-DCMAKE_INSTALL_PREFIX:PATH=${MPI_HOME}"
+      "-DCMAKE_PREFIX_PATH:PATH=${MPI_HOME};%{_prefix}"
       "-DCMAKE_INSTALL_Fortran_MODULES:PATH=${MPI_FORTRAN_MOD_DIR}/cp2k"
-      "-DCMAKE_INSTALL_LIBDIR:PATH=lib"
-      "-DCP2K_CMAKE_SUFFIX:STRING=${MPI_SUFFIX}"
       "-DCP2K_DATA_DIR:PATH=%{_datadir}/cp2k/data"
+      "-DCP2K_USE_MPI:BOOL=ON"
       "-DCP2K_USE_MPI_F08:BOOL=ON"
     )
   else
     cmake_mpi_args=(
-      "-DCP2K_USE_MPI:BOOL=OFF"
       "-DCMAKE_INSTALL_Fortran_MODULES:PATH=%{_fmoddir}/cp2k"
+      "-DCMAKE_INSTALL_LIBDIR:PATH=lib64"
+      "-DCP2K_USE_MPI:BOOL=OFF"
     )
   fi
 
@@ -197,30 +187,32 @@ rm -f %{_buildrootdir}/**/%{_bindir}/*_unittest.*
 rm -f %{_buildrootdir}/**/%{_libdir}/openmpi/bin/*_unittest.*
 rm -f %{_buildrootdir}/**/%{_libdir}/mpich/bin/*_unittest.*
 
-
 %check
 export CP2K_DATA_DIR=%{buildroot}%{_datadir}/cp2k/data
 # See %%_openmpi_load
 export PRTE_MCA_rmaps_default_mapping_policy=:oversubscribe
-test_common_args=(
-  "--skip_regtests"
-  "--ompthreads 2"
-)
 for mpi in '' mpich openmpi ; do
   if [ -n "$mpi" ]; then
     # Another module load is done inside the do_regtest.sh. will use that instead
     module load mpi/${mpi}-%{_arch}
     bindir=${MPI_BIN}
     libdir=${MPI_LIB}
+    test_common_args=(
+      "--skip_regtests"
+      "--ompthreads 2"
+      "--mpiranks 2")
     # Note, final position arguments are also here
-    test_mpi_args=(
-      "--mpiranks 2"
+    final_args=(
       "psmp"
     )
   else
     bindir=%{_bindir}
     libdir=%{_libdir}
-    test_mpi_args=(
+    test_common_args=(
+      "--skip_regtests"
+      "--ompthreads 2"
+    )
+    final_args=(
       "ssmp"
     )
   fi
@@ -229,7 +221,7 @@ for mpi in '' mpich openmpi ; do
   # so the binary folder should point to the build directory
   env PATH=%{buildroot}${bindir}:${PATH} \
     LD_LIBRARY_PATH=%{buildroot}${libdir} \
-    tests/do_regtest.py ${test_common_args[@]} %{_vpath_builddir}/bin ${test_mpi_args[@]}
+    tests/do_regtest.py ${test_common_args[@]} %{_vpath_builddir}/bin ${final_args[@]}
   [ -n "$mpi" ] && module unload mpi/${mpi}-%{_arch}
 done
 

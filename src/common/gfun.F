@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -62,7 +62,7 @@ CONTAINS
 
       IF (t <= 12.0_dp) THEN
          ! downward recursion
-         g(nmax) = gfun_taylor(nmax, t); 
+         g(nmax) = gfun_taylor(nmax, t);
          DO i = nmax, 1, -1
             g(i - 1) = (1.0_dp - 2.0_dp*t*g(i))/(2.0_dp*i - 1.0_dp)
          END DO

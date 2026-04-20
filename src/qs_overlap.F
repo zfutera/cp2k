@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -73,10 +73,10 @@ MODULE qs_overlap
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_overlap'
 
    ! should be a parameter, but this triggers a bug in OMPed code with gfortran 4.9
-   INTEGER, DIMENSION(1:56), SAVE :: ndod = (/0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, &
-                                              1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, &
-                                              0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, &
-                                              1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1/)
+   INTEGER, DIMENSION(1:56), SAVE :: ndod = [0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, &
+                                             1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, &
+                                             0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, &
+                                             1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 
    INTERFACE create_sab_matrix
       MODULE PROCEDURE create_sab_matrix_1d, create_sab_matrix_2d
@@ -102,6 +102,7 @@ CONTAINS
 !> \param   calculate_forces (optional) ...
 !> \param   matrix_p density matrix for force calculation (optional)
 !> \param   matrixkp_p density matrix for force calculation with k_points (optional)
+!> \param ext_kpoints ...
 !> \date    11.03.2002
 !> \par     History
 !>          Enlarged functionality of this routine. Now overlap matrices based
@@ -116,7 +117,7 @@ CONTAINS
 ! **************************************************************************************************
    SUBROUTINE build_overlap_matrix(ks_env, matrix_s, matrixkp_s, matrix_name, &
                                    nderivative, basis_type_a, basis_type_b, sab_nl, calculate_forces, &
-                                   matrix_p, matrixkp_p)
+                                   matrix_p, matrixkp_p, ext_kpoints)
 
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
       TYPE(dbcsr_p_type), DIMENSION(:), OPTIONAL, &
@@ -132,6 +133,7 @@ CONTAINS
       TYPE(dbcsr_type), OPTIONAL, POINTER                :: matrix_p
       TYPE(dbcsr_p_type), DIMENSION(:, :), OPTIONAL, &
          POINTER                                         :: matrixkp_p
+      TYPE(kpoint_type), OPTIONAL, POINTER               :: ext_kpoints
 
       INTEGER                                            :: natom
 
@@ -141,7 +143,7 @@ CONTAINS
 
       CALL build_overlap_matrix_low(ks_env, matrix_s, matrixkp_s, matrix_name, nderivative, &
                                     basis_type_a, basis_type_b, sab_nl, calculate_forces, &
-                                    matrix_p, matrixkp_p, natom)
+                                    matrix_p, matrixkp_p, ext_kpoints, natom)
 
    END SUBROUTINE build_overlap_matrix
 
@@ -159,11 +161,12 @@ CONTAINS
 !> \param calculate_forces ...
 !> \param matrix_p ...
 !> \param matrixkp_p ...
+!> \param ext_kpoints ...
 !> \param natom ...
 ! **************************************************************************************************
    SUBROUTINE build_overlap_matrix_low(ks_env, matrix_s, matrixkp_s, matrix_name, nderivative, &
                                        basis_type_a, basis_type_b, sab_nl, calculate_forces, &
-                                       matrix_p, matrixkp_p, natom)
+                                       matrix_p, matrixkp_p, ext_kpoints, natom)
 
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
       TYPE(dbcsr_p_type), DIMENSION(:), OPTIONAL, &
@@ -179,6 +182,7 @@ CONTAINS
       TYPE(dbcsr_type), OPTIONAL, POINTER                :: matrix_p
       TYPE(dbcsr_p_type), DIMENSION(:, :), OPTIONAL, &
          POINTER                                         :: matrixkp_p
+      TYPE(kpoint_type), OPTIONAL, POINTER               :: ext_kpoints
       INTEGER, INTENT(IN)                                :: natom
 
       CHARACTER(len=*), PARAMETER :: routineN = 'build_overlap_matrix_low'
@@ -220,26 +224,38 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      ! test for matrices (kpoints or standard gamma point)
-      IF (PRESENT(matrix_s)) THEN
-         dokp = .FALSE.
-         use_cell_mapping = .FALSE.
-      ELSEIF (PRESENT(matrixkp_s)) THEN
-         dokp = .TRUE.
-         CALL get_ks_env(ks_env=ks_env, kpoints=kpoints)
-         CALL get_kpoint_info(kpoint=kpoints, cell_to_index=cell_to_index)
-         use_cell_mapping = (SIZE(cell_to_index) > 1)
-      ELSE
-         CPABORT("")
-      END IF
-
       NULLIFY (atomic_kind_set)
       CALL get_ks_env(ks_env, &
                       atomic_kind_set=atomic_kind_set, &
                       qs_kind_set=qs_kind_set, &
                       dft_control=dft_control)
 
-      nimg = dft_control%nimages
+      ! test for matrices (kpoints or standard gamma point)
+      IF (PRESENT(matrix_s)) THEN
+         dokp = .FALSE.
+         use_cell_mapping = .FALSE.
+         nimg = dft_control%nimages
+      ELSEIF (PRESENT(matrixkp_s)) THEN
+         dokp = .TRUE.
+         IF (PRESENT(ext_kpoints)) THEN
+            IF (ASSOCIATED(ext_kpoints)) THEN
+               CALL get_kpoint_info(kpoint=ext_kpoints, cell_to_index=cell_to_index)
+               use_cell_mapping = (SIZE(cell_to_index) > 1)
+               nimg = SIZE(ext_kpoints%index_to_cell, 2)
+            ELSE
+               use_cell_mapping = .FALSE.
+               nimg = 1
+            END IF
+         ELSE
+            CALL get_ks_env(ks_env=ks_env, kpoints=kpoints)
+            CALL get_kpoint_info(kpoint=kpoints, cell_to_index=cell_to_index)
+            use_cell_mapping = (SIZE(cell_to_index) > 1)
+            nimg = dft_control%nimages
+         END IF
+      ELSE
+         CPABORT("")
+      END IF
+
       nkind = SIZE(qs_kind_set)
 
       IF (PRESENT(calculate_forces)) THEN
@@ -305,7 +321,7 @@ CONTAINS
 !$OMP         matrix_s, matrix_p,basis_set_list_a, basis_set_list_b, cell_to_index, &
 !$OMP         matrixkp_s, matrixkp_p, locks, natom)  &
 !$OMP PRIVATE (oint, owork, pmat, sint, ikind, jkind, iatom, jatom, rab, cell, &
-!$OMP          basis_set_a, basis_set_b, &
+!$OMP          basis_set_a, basis_set_b, lock_num, &
 !$OMP          first_sgfa, la_max, la_min, npgfa, nsgfa, nseta, rpgfa, set_radius_a, ncoa, ncob, force_a, &
 !$OMP          zeta, first_sgfb, lb_max, lb_min, npgfb, nsetb, rpgfb, set_radius_b, nsgfb, p_block, dab, f,  &
 !$OMP          zetb, scon_a, scon_b, ic, irow, icol, f0, ff, found, trans, rab2, n1, n2, sgfa, sgfb, iset, jset, &

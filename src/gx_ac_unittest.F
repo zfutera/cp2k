@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -14,7 +14,7 @@ PROGRAM gx_ac_unittest
 #if !defined(__GREENX)
    ! Abort and inform that GreenX was not included in the compilation
    ! Ideally, this will be avoided in testing by the conditional tests
-   CPABORT("CP2K not compiled with GreenX link - please recompile to access GXAC.")
+   CPABORT("CP2K not compiled with GreenX library.")
 #else
    USE kinds, ONLY: dp
    USE gx_ac, ONLY: create_thiele_pade, &

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -15,9 +15,10 @@ MODULE torch_api
                             C_NULL_CHAR, &
                             C_NULL_PTR, &
                             C_PTR, &
+                            C_INT32_T, &
                             C_INT64_T
 
-   USE kinds, ONLY: sp, int_8, dp, default_string_length
+   USE kinds, ONLY: sp, int_4, int_8, dp, default_string_length
 
 #include "./base/base_uses.f90"
 
@@ -43,6 +44,7 @@ MODULE torch_api
    #:set max_dim = 3
    INTERFACE torch_tensor_from_array
       #:for ndims  in range(1, max_dim+1)
+         MODULE PROCEDURE torch_tensor_from_array_int32_${ndims}$d
          MODULE PROCEDURE torch_tensor_from_array_float_${ndims}$d
          MODULE PROCEDURE torch_tensor_from_array_int64_${ndims}$d
          MODULE PROCEDURE torch_tensor_from_array_double_${ndims}$d
@@ -51,6 +53,7 @@ MODULE torch_api
 
    INTERFACE torch_tensor_data_ptr
       #:for ndims  in range(1, max_dim+1)
+         MODULE PROCEDURE torch_tensor_data_ptr_int32_${ndims}$d
          MODULE PROCEDURE torch_tensor_data_ptr_float_${ndims}$d
          MODULE PROCEDURE torch_tensor_data_ptr_int64_${ndims}$d
          MODULE PROCEDURE torch_tensor_data_ptr_double_${ndims}$d
@@ -74,9 +77,9 @@ MODULE torch_api
 
 CONTAINS
 
-   #:set typenames = ['float', 'int64', 'double']
-   #:set types_f = ['REAL(sp)','INTEGER(kind=int_8)', 'REAL(dp)']
-   #:set types_c = ['REAL(kind=C_FLOAT)','INTEGER(kind=C_INT64_T)', 'REAL(kind=C_DOUBLE)']
+   #:set typenames = ['int32', 'float', 'int64', 'double']
+   #:set types_f = ['INTEGER(kind=int_4)', 'REAL(sp)', 'INTEGER(kind=int_8)', 'REAL(dp)']
+   #:set types_c = ['INTEGER(kind=C_INT32_T)', 'REAL(kind=C_FLOAT)', 'INTEGER(kind=C_INT64_T)', 'REAL(kind=C_DOUBLE)']
 
    #:for ndims in range(1, max_dim+1)
       #:for typename, type_f, type_c in zip(typenames, types_f, types_c)
@@ -99,7 +102,7 @@ CONTAINS
             INTERFACE
                SUBROUTINE torch_c_tensor_from_array_${typename}$ (tensor, req_grad, ndims, sizes, source) &
                   BIND(C, name="torch_c_tensor_from_array_${typename}$")
-                  IMPORT :: C_PTR, C_INT, C_INT64_T, C_FLOAT, C_DOUBLE, C_BOOL
+                  IMPORT :: C_PTR, C_INT, C_INT32_T, C_INT64_T, C_FLOAT, C_DOUBLE, C_BOOL
                   TYPE(C_PTR)                                  :: tensor
                   LOGICAL(kind=C_BOOL), VALUE                  :: req_grad
                   INTEGER(kind=C_INT), VALUE                   :: ndims
@@ -147,7 +150,7 @@ CONTAINS
             INTERFACE
                SUBROUTINE torch_c_tensor_data_ptr_${typename}$ (tensor, ndims, sizes, data_ptr) &
                   BIND(C, name="torch_c_tensor_data_ptr_${typename}$")
-                  IMPORT :: C_CHAR, C_PTR, C_INT, C_INT64_T
+                  IMPORT :: C_CHAR, C_PTR, C_INT, C_INT32_T, C_INT64_T
                   TYPE(C_PTR), VALUE                           :: tensor
                   INTEGER(kind=C_INT), VALUE                   :: ndims
                   INTEGER(kind=C_INT64_T), DIMENSION(*)        :: sizes
@@ -511,7 +514,7 @@ CONTAINS
       CPASSERT(C_ASSOCIATED(content_c))
       CPASSERT(length >= 0)
 
-      CALL C_F_POINTER(content_c, content_f, shape=(/length + 1/))
+      CALL C_F_POINTER(content_c, content_f, shape=[length + 1])
       CPASSERT(content_f(length + 1) == C_NULL_CHAR)
 
       ALLOCATE (CHARACTER(LEN=length) :: res)
@@ -523,10 +526,10 @@ CONTAINS
       DEALLOCATE (content_f) ! Was allocated on the C side.
       CALL timestop(handle)
 #else
-      CPABORT("CP2K was compiled without Torch library.")
+      res = ""
       MARK_USED(filename)
       MARK_USED(key)
-      MARK_USED(res)
+      CPABORT("CP2K was compiled without Torch library.")
 #endif
    END FUNCTION torch_model_read_metadata
 
@@ -608,8 +611,9 @@ CONTAINS
    #:set typenames = ['int64', 'double', 'string']
    #:set types_f = ['INTEGER(kind=int_8)', 'REAL(dp)', 'CHARACTER(LEN=default_string_length)']
    #:set types_c = ['INTEGER(kind=C_INT64_T)', 'REAL(kind=C_DOUBLE)', 'CHARACTER(kind=C_CHAR), DIMENSION(*)']
+   #:set zeros_f = ['0', '0.0_dp', '""']
 
-   #:for typename, type_f, type_c in zip(typenames, types_f, types_c)
+   #:for typename, type_f, type_c, zero_f in zip(typenames, types_f, types_c, zeros_f)
 ! **************************************************************************************************
 !> \brief Retrieves an attribute from a Torch model. Must be called before torch_model_freeze.
 !> \author Ole Schuett
@@ -635,10 +639,10 @@ CONTAINS
                                                    key=TRIM(key)//C_NULL_CHAR, &
                                                    dest=dest)
 #else
-         CPABORT("CP2K compiled without the Torch library.")
+         dest = ${zero_f}$
          MARK_USED(model)
          MARK_USED(key)
-         MARK_USED(dest)
+         CPABORT("CP2K compiled without the Torch library.")
 #endif
       END SUBROUTINE torch_model_get_attr_${typename}$
    #:endfor

@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -1203,7 +1203,7 @@ CONTAINS
          jatom = ind(2)
          katom = ind(3)
 
-         IF (atom_k .NE. katom) CYCLE
+         IF (atom_k /= katom) CYCLE
 
          CALL dbt_get_block(ab_Q, ind, iabc, t_found)
          IF (.NOT. t_found) CYCLE
@@ -1368,9 +1368,9 @@ CONTAINS
             ! If on-diagonal quadrants only, can skip jso < iso
             IF (.NOT. quadrants(2) .AND. jso < iso) CYCLE
 
-            i = iso; j = jso; 
+            i = iso; j = jso;
             IF (my_mt) THEN
-               i = jso; j = iso; 
+               i = jso; j = iso;
             END IF
 
             ! Take the product lhs*rhs^T

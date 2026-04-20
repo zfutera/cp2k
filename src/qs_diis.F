@@ -1,6 +1,6 @@
 !--------------------------------------------------------------------------------------------------!
 !   CP2K: A general program to perform molecular dynamics simulations                              !
-!   Copyright 2000-2025 CP2K developers group <https://cp2k.org>                                   !
+!   Copyright 2000-2026 CP2K developers group <https://cp2k.org>                                   !
 !                                                                                                  !
 !   SPDX-License-Identifier: GPL-2.0-or-later                                                      !
 !--------------------------------------------------------------------------------------------------!
@@ -717,7 +717,7 @@ CONTAINS
          ev(1:nb) = MATMUL(a(1:nb, 1:nb1), b(nb1, 1:nb1))
 
          ! Update Kohn-Sham matrix
-         IF (iscf .GE. ls_scf_env%iter_ini_diis) THEN ! if-iscf-to-updateKS------ START
+         IF (iscf >= ls_scf_env%iter_ini_diis) THEN ! if-iscf-to-updateKS------ START
 
             IF (unit_nr > 0) THEN
                WRITE (unit_nr, '(A40,I3)') 'DIIS: Updating Kohn-Sham matrix at iscf=', iscf
