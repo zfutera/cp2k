@@ -166,6 +166,14 @@ list(
   eri_mme/eri_mme_types.F
   eri_mme/eri_mme_util.F
   et_coupling.F
+  et_coupling_pod.F
+  et_coupling_pod_core.F
+  et_coupling_pod_mo.F
+  et_coupling_pod_print.F
+  et_coupling_pod_read.F
+  et_coupling_pod_save.F
+  et_coupling_pod_types.F
+  et_coupling_pod_utils.F
   et_coupling_proj.F
   et_coupling_types.F
   ewald_environment_types.F
