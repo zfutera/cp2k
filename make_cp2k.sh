@@ -28,9 +28,9 @@
 #          or renaming the folder cp2k/spack. The latter allows for keeping different
 #          software stacks (see also -bd and -bd_only flags).
 #
-#          It is recommended to install podman to take advantage of a local cache.
+#          It is recommended to store already compiled packages in a cache (default).
 #          This will accelerate the (re)build of the CP2K dependencies with Spack
-#          significantly.
+#          significantly (see -uc flag).
 #
 #          After the CP2K dependencies are built with Spack, CP2K itself is built
 #          and installed using CMake in the subfolders cp2k/build and cp2k/install,
@@ -50,26 +50,7 @@
 
 # Authors: Matthias Krack (MK)
 
-# Version: 1.7
-
-# History: - Creation (19.12.2025, MK)
-#          - Version 0.1: First working version (09.01.2026, MK)
-#          - Version 0.2: Add more flags and checks (19.01.2026, MK)
-#          - Version 0.3: Add no_externals flag and perform more checks (21.01.2026, MK)
-#          - Version 0.4: Improve error handling and provide more hints (22.01.2026, MK)
-#          - Version 0.5: Adapt script for use within a container (24.01.2026, MK)
-#          - Version 0.6: Add MPI flag and revise flag parsing (27.01.2026, MK)
-#          - Version 0.7: Fix container detection (28.01.2026, MK)
-#          - Version 0.8: Add --build_deps_only flag (29.01.2026, MK)
-#          - Version 0.9: Add --disable_local_cache flag (30.01.2026, MK)
-#          - Version 1.0: Add Cray specific configuration (01.02.2026, MK)
-#          - Version 1.1: Allow for selecting the GCC version (02.02.2026, MK)
-#          - Version 1.2: Add option for static build (05.02.2026, MK)
-#          - Version 1.3: Add CUDA GPU support (10.02.2026, MK)
-#          - Version 1.4: Drop download of spack-packages (12.02.2026, MK)
-#          - Version 1.5: Add flags to enable/disable features selectively (15.02.2026, MK)
-#          - Version 1.6: Enable dbg and smp builds (01.03.2026, MK)
-#          - Version 1.7: Add flag for building a static CP2K library libcp2k.a (25.03.2026, MK)
+# Version: 1.9
 
 # Facilitate the deugging of this script
 set -uo pipefail
@@ -88,6 +69,15 @@ else
   EXIT_CMD="exit"
 fi
 
+# Check platform
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  echo "ERROR: A build for Apple macOS (Darwin, Homebrew) is not supported yet,"
+  echo "       but CP2K can be built within a container using podman."
+  echo "       Check the Dockerfiles in the folder cp2k/tools/docker like"
+  echo "       Dockerfile.test_spack_openmpi-psmp and the usage description in their header"
+  ${EXIT_CMD} 1
+fi
+
 # Help finding ldconfig
 if ! command -v ldconfig &> /dev/null; then
   PATH="${PATH}:/sbin"
@@ -102,12 +92,8 @@ for package in awk bzip2 find g++ gcc gfortran git gzip ldconfig make patch pyth
   fi
 done
 
-# Check platform
-if [[ "$(uname -s)" == "Darwin" ]]; then
-  echo "ERROR: A build for Apple macOS (Darwin, Homebrew) is not supported yet,"
-  echo "       but CP2K can be built within a container, e.g. using Ubuntu"
-  ${EXIT_CMD} 1
-fi
+# Disable python bytecode generation to suppress __pycache__ folder creation
+export PYTHONDONTWRITEBYTECODE=1
 
 # Print OS info if available
 if [[ -f /etc/os-release ]]; then
@@ -156,10 +142,8 @@ CMAKE_FEATURE_FLAG_MPI="-DCP2K_USE_MPI=ON"        # MPI is switched on by defaul
 CMAKE_FEATURE_FLAGS_GPU="-DCP2K_USE_SPLA_GEMM_OFFLOADING=ON"
 CRAY="no"
 CUDA_SM_CODE=0
-DISABLE_LOCAL_CACHE="no"
 GCC_VERSION="auto"
 GPU_MODEL="none"
-HAS_PODMAN="no"
 HELP="no"
 INSTALL_MESSAGE="NEVER"
 MPI_MODE="mpich"
@@ -176,6 +160,7 @@ REBUILD_CP2K="no"
 RUN_TEST="no"
 SED_PATTERN_LIST=""
 TESTOPTS=""
+USE_CACHE="folder"
 USE_EXTERNALS="no"
 VERBOSE=0
 VERBOSE_FLAG="--quiet"
@@ -246,10 +231,10 @@ while [[ $# -gt 0 ]]; do
             case "${CP2K_VERSION}" in
               ssmp-static)
                 CMAKE_FEATURE_FLAG_ALL="-DCP2K_USE_EVERYTHING=ON"
-                for package in libint2 libxc libxsmm spglib vori tblite; do
+                for package in libfci libint2 libxc libxs spglib vori tblite; do
                   CMAKE_FEATURE_FLAGS+=" -DCP2K_USE_${package^^}=ON"
                 done
-                for package in ace deepmd greenx hdf5 libtorch pexsi trexio; do
+                for package in ace deepmd gauxc greenx hdf5 libtorch pexsi trexio; do
                   CMAKE_FEATURE_FLAGS+=" -DCP2K_USE_${package^^}=OFF"
                 done
                 ;;
@@ -282,27 +267,27 @@ while [[ $# -gt 0 ]]; do
           all)
             # Enable or disable all features
             CMAKE_FEATURE_FLAG_ALL="-DCP2K_USE_EVERYTHING=${ON_OFF}"
-            for package in adios2 cosma deepmdkit dla-future dla-future-fortran \
-              elpa greenx hdf5 libfabric libint libvdwxc libsmeagol libvori libxc \
-              libxsmm mimic-mcl openpmd-api pace pexsi plumed py-torch sirius spfft \
+            for package in adios2 cosma deepmdkit dla-future dla-future-fortran elpa \
+              gauxc greenx hdf5 libfci libfabric libint libvdwxc libsmeagol libvori libxc \
+              libxs mimic-mcl openpmd-api pace pexsi plumed py-torch sirius spfft \
               spglib spla tblite trexio; do
               SED_PATTERN_LIST+=" -e '/\s*-\s+\"${package}@/ ${SUBST}"
             done
-            # dbcsr must use blas as fallback when libxsmm is disabled
+            # dbcsr must use blas as fallback when libxs/libxsmm is disabled
             if [[ "${ON_OFF}" == "OFF" ]]; then
               SED_PATTERN_LIST+=" -e '/\s*-\s+\"smm=libxsmm\"/ s/libxsmm/blas/'"
             fi
             ;;
-          ace | cosma | deepmd | dftd4 | dlaf | elpa | fftw3 | greenx | hdf5 | libint2 | \
-            libsmeagol | libtorch | libxc | libxsmm | mimic | openpmd | pexsi | plumed | \
-            spglib | tblite | trexio | vori)
+          ace | cosma | deepmd | dftd4 | dlaf | elpa | fftw3 | gauxc | greenx | hdf5 | libfci | libint2 | \
+            libsmeagol | libtorch | libxc | libxs | mimic | openpmd | pexsi | plumed | spglib | \
+            tblite | trexio | vori)
             CMAKE_FEATURE_FLAGS+=" -DCP2K_USE_${2^^}=${ON_OFF}"
             # Translate package selection to sed pattern
             case "${2,,}" in
               ace)
                 SED_PATTERN_LIST+=" -e '/\s*-\s+\"p${2,,}@/ ${SUBST}"
                 ;;
-              cosma | elpa | greenx | hdf5 | libsmeagol | libxc | pexsi | plumed | spglib | trexio)
+              cosma | elpa | greenx | hdf5 | libfci | libsmeagol | libxc | pexsi | plumed | spglib | trexio)
                 SED_PATTERN_LIST+=" -e '/\s*-\s+\"${2,,}@/ ${SUBST}"
                 ;;
               deepmd)
@@ -327,19 +312,30 @@ while [[ $# -gt 0 ]]; do
               fftw3)
                 SED_PATTERN_LIST+=" -e '/\s*-\s+\"fftw@/ ${SUBST}"
                 ;;
+              gauxc)
+                SED_PATTERN_LIST+=" -e '/\s*-\s+\"${2,,}@/ ${SUBST}"
+                if [[ "${ON_OFF}" == "ON" ]]; then
+                  # GauXC requires libtorch
+                  CMAKE_FEATURE_FLAGS+=" -DCP2K_USE_LIBTORCH=${ON_OFF}"
+                  SED_PATTERN_LIST+=" -e '/\s*-\s+\"py-torch@/ ${SUBST}"
+                fi
+                ;;
               libint2)
                 SED_PATTERN_LIST+=" -e '/\s*-\s+\"libint@/ ${SUBST}"
                 ;;
               libtorch)
                 SED_PATTERN_LIST+=" -e '/\s*-\s+\"py-torch@/ ${SUBST}"
                 if [[ "${ON_OFF}" == "OFF" ]]; then
-                  # DeePMD-kit requires libtorch
+                  # DeePMD-kit and GauXC require libtorch
                   CMAKE_FEATURE_FLAGS+=" -DCP2K_USE_DEEPMD=${ON_OFF}"
                   SED_PATTERN_LIST+=" -e '/\s*-\s+\"deepmdkit@/ ${SUBST}"
+                  CMAKE_FEATURE_FLAGS+=" -DCP2K_USE_GAUXC=${ON_OFF}"
+                  SED_PATTERN_LIST+=" -e '/\s*-\s+\"gauxc@/ ${SUBST}"
                 fi
                 ;;
-              libxsmm)
+              libxs)
                 SED_PATTERN_LIST+=" -e '/\s*-\s+\"${2,,}@/ ${SUBST}"
+                SED_PATTERN_LIST+=" -e '/\s*-\s+\"libxsmm@/ ${SUBST}"
                 if [[ "${ON_OFF}" == "OFF" ]]; then
                   SED_PATTERN_LIST+=" -e '/\s*-\s+\"smm=${2,,}\"/ s/${2,,}/blas/'"
                 fi
@@ -393,10 +389,6 @@ while [[ $# -gt 0 ]]; do
         ${EXIT_CMD} 1
       fi
       shift 2
-      ;;
-    -dlc | --disable_local_cache)
-      DISABLE_LOCAL_CACHE="yes"
-      shift 1
       ;;
     -gv | --gcc_version)
       if (($# > 1)); then
@@ -551,6 +543,23 @@ while [[ $# -gt 0 ]]; do
       fi
       shift 2
       ;;
+    -uc | --use_cache)
+      if (($# > 1)); then
+        case "${2,,}" in
+          folder | minio | no | none)
+            USE_CACHE="${2,,}"
+            ;;
+          *)
+            echo "ERROR: Invalid cache mode \"${2}\" specified (choose folder, minio or no)"
+            ${EXIT_CMD} 1
+            ;;
+        esac
+      else
+        echo "ERROR: No argument found for flag \"${1}\" (choose folder, minio or no)"
+        ${EXIT_CMD} 1
+      fi
+      shift 2
+      ;;
     -ue | --use_externals)
       USE_EXTERNALS="yes"
       shift 1
@@ -609,8 +618,8 @@ done
 CMAKE_FEATURE_FLAGS="$(printf '%s\n' "${out[*]}")"
 
 export BUILD_DEPS BUILD_DEPS_ONLY BUILD_SHARED_LIBS CMAKE_FEATURE_FLAGS CMAKE_FEATURE_FLAGS_GPU CP2K_BUILD_TYPE \
-  CRAY CUDA_SM_CODE DEPS_BUILD_TYPE DISABLE_LOCAL_CACHE GCC_VERSION GPU_MODEL HAS_PODMAN IN_CONTAINER INSTALL_MESSAGE \
-  MPI_MODE NUM_PACKAGES NUM_PROCS REBUILD_CP2K RUN_TEST TESTOPTS VERBOSE VERBOSE_FLAG VERBOSE_MAKEFILE VERBOSE_SPACK
+  CRAY CUDA_SM_CODE DEPS_BUILD_TYPE GCC_VERSION GPU_MODEL IN_CONTAINER INSTALL_MESSAGE MPI_MODE NUM_PACKAGES \
+  NUM_PROCS REBUILD_CP2K RUN_TEST TESTOPTS USE_CACHE VERBOSE VERBOSE_FLAG VERBOSE_MAKEFILE VERBOSE_SPACK
 
 # Show help if requested
 if [[ "${HELP}" == "yes" ]]; then
@@ -622,7 +631,6 @@ if [[ "${HELP}" == "yes" ]]; then
   echo "                    [-cray]"
   echo "                    [-cv | --cp2k_version (pdbg | psmp | sdbg | ssmp | ssmp-static)]"
   echo "                    [-df | --disable | --disable_feature (all | FEATURE | PACKAGE | none)"
-  echo "                    [-dlc | --disable_local_cache]"
   echo "                    [-ef | --enable | --enable_feature (all | FEATURE | PACKAGE | none)"
   echo "                    [-gm | -gpu  | --gpu_model (<CUDA SM code> | P100 | V100 | T400 | A100 | H100 | H200 | GH200 | none)]"
   echo "                    [-gv | --gcc_version (10 | 11 | 12 | 13 | 14 | 15 | 16)]"
@@ -633,6 +641,7 @@ if [[ "${HELP}" == "yes" ]]; then
   echo "                    [-np | --num_packages #PACKAGES]"
   echo "                    [-rc | --rebuild_cp2k]"
   echo "                    [-t | -test \"TESTOPTS\"]"
+  echo "                    [-uc | --use_cache (folder | minio | no | none)]"
   echo "                    [-ue | --use_externals]"
   echo "                    [-v | --verbose]"
   echo ""
@@ -643,7 +652,6 @@ if [[ "${HELP}" == "yes" ]]; then
   echo " --build_type          : Set preferred CMake build type for CP2K (default: \"Release\")"
   echo " --cp2k_version        : CP2K version to be built (default: \"psmp\")"
   echo " -cray                 : Use Cray specific spack configuration"
-  echo " --disable_local_cache : Don't add local Spack cache"
   echo " --enable_feature      : Enable feature or package (default: all)"
   echo " --disable_feature     : Disable feature or package"
   echo " --help                : Print this help information"
@@ -655,6 +663,9 @@ if [[ "${HELP}" == "yes" ]]; then
   echo " --num_packages        : Maximum number of packages built by spack in parallel (default: 4)"
   echo " --rebuild_cp2k        : Rebuild CP2K: removes the build folder (default: no)"
   echo " --test                : Perform a regression test run after a successful build"
+  echo " --use_cache           : Use a \"folder\", a \"MinIO\" object storage container (requires podman) or \"no\" cache"
+  echo "                         Set the environment variable SPACK_CACHE to specify the folder name, e.g."
+  echo "                         SPACK_CACHE=\"file://${CP2K_ROOT}/spack_cache\" (default)"
   echo " --use_externals       : Use external packages installed on the host system. This results in much"
   echo "                         faster build times, but it can also cause conflicts with outdated packages"
   echo "                         pulled in from the host system, e.g. old python or gcc versions"
@@ -667,9 +678,9 @@ if [[ "${HELP}" == "yes" ]]; then
   echo "   (see also --build_deps flag)"
   echo " - The folder ${CP2K_ROOT}/install is updated after each successful run"
   echo ""
-  echo "Packages: all | ace | cosma | deepmd | dftd4 | dlaf | elpa | fftw3 | greenx | hdf5 | libint2 |"
-  echo "          libsmeagol | libtorch | libvdwxc | libxsmm | mimic | openpmd | pexsi | plumed | sirius |"
-  echo "          spfft | spglib | spla | tblite | trexio | vori "
+  echo "Packages: all | ace | cosma | deepmd | dftd4 | dlaf | elpa | fftw3 | gauxc | greenx | hdf5 | libfci |"
+  echo "          libint | libsmeagol | libtorch | libvdwxc | libxs | mimic | openpmd | pexsi | plumed |"
+  echo "          sirius | spfft | spglib | spla | tblite | trexio | vori "
   echo ""
   echo "Features: cray_pm_accel_energy | cusolver_mp | dbm_gpu | elpa_gpu | grid_gpu | pw_gpu |"
   echo "          spla_gemm_offloading | unified_memory"
@@ -685,7 +696,6 @@ echo "CP2K_BUILD_TYPE     = ${CP2K_BUILD_TYPE}"
 echo "CP2K_VERSION        = ${CP2K_VERSION}"
 echo "CRAY                = ${CRAY}"
 echo "DEPS_BUILD_TYPE     = ${DEPS_BUILD_TYPE}"
-echo "DISABLE_LOCAL_CACHE = ${DISABLE_LOCAL_CACHE}"
 echo "GCC_VERSION         = ${GCC_VERSION}"
 if ((CUDA_SM_CODE > 0)); then
   echo "GPU                 = ${GPU_MODEL} (CUDA SM code: ${CUDA_SM_CODE})"
@@ -704,6 +714,7 @@ echo "RUN_TEST            = ${RUN_TEST}"
 if [[ "${RUN_TEST}" == "yes" ]]; then
   echo "TESTOPTS            = \"${TESTOPTS}\""
 fi
+echo "USE_CACHE           = ${USE_CACHE}"
 echo "USE_EXTERNALS       = ${USE_EXTERNALS}"
 echo "VERBOSE_FLAG        = ${VERBOSE_FLAG}"
 echo "VERBOSE_MAKEFILE    = ${VERBOSE_MAKEFILE}"
@@ -880,6 +891,11 @@ export SPACK_VERSION="${SPACK_VERSION:-1.1.1}"
 export SPACK_BUILD_PATH="${CP2K_ROOT}/spack"
 export SPACK_ROOT="${SPACK_BUILD_PATH}/spack"
 
+# Isolate user configuration for spack
+export SPACK_DISABLE_LOCAL_CONFIG=true
+export SPACK_USER_CONFIG_PATH="${SPACK_BUILD_PATH}"
+export SPACK_USER_CACHE_PATH="${SPACK_BUILD_PATH}/cache"
+
 # Define the CP2K spack configuration file
 export CP2K_CONFIG_FILE="${SPACK_BUILD_PATH}/cp2k_deps_${CP2K_VERSION:0:1}${CP2K_VERSION:4}.yaml"
 
@@ -921,13 +937,14 @@ if [[ ! -d "${SPACK_BUILD_PATH}" ]]; then
   fi
   export PATH="${SPACK_ROOT}/bin:${PATH}"
 
-  # Isolate user configuration for spack
-  export SPACK_DISABLE_LOCAL_CONFIG=true
-  export SPACK_USER_CONFIG_PATH="${SPACK_BUILD_PATH}"
-  export SPACK_USER_CACHE_PATH="${SPACK_BUILD_PATH}/cache"
+  # Create cache folder for user configuration
   mkdir -p "${SPACK_USER_CACHE_PATH}"
 
-  if [[ "${DISABLE_LOCAL_CACHE}" == "no" ]]; then
+  # Set Spack cache (folder is the default)
+  export SPACK_CACHE="${SPACK_CACHE:-file://${CP2K_ROOT}/spack_cache}"
+
+  # Prepare for package caching
+  if [[ "${USE_CACHE}" == @("folder"|"minio") ]]; then
     # Create and activate a virtual environment (venv) for Python packages
     if command -v python3 -m venv --help &> /dev/null; then
       echo "Installing virtual environment for Python packages"
@@ -944,19 +961,25 @@ if [[ ! -d "${SPACK_BUILD_PATH}" ]]; then
     if command -v python3 -m pip --version &> /dev/null; then
       python3 -m pip install "${VERBOSE_FLAG}" --upgrade pip
       echo "Installing boto3 module"
-      python3 -m pip install "${VERBOSE_FLAG}" boto3==1.38.11 google-cloud-storage==3.1.0
+      if ! python3 -m pip install "${VERBOSE_FLAG}" \
+        boto3==1.38.11 google-cloud-storage==3.1.0; then
+        echo "ERROR: The installation of Python packages for the Spack cache failed"
+        ${EXIT_CMD} 1
+      fi
     else
       echo "ERROR: python3 -m pip was not found"
       ${EXIT_CMD} 1
     fi
   fi
 
-  # Initialize Spack shell hooks
-  # shellcheck source=/dev/null
-  source "${SPACK_ROOT}/share/spack/setup-env.sh"
-
-  if [[ "${IN_CONTAINER}" == "no" ]] && [[ "${DISABLE_LOCAL_CACHE}" == "no" ]]; then
-    # The package podman is required for using a MinIO cache
+  # Prepare for using an MinIO object storage as cache
+  if [[ "${USE_CACHE}" == "minio" ]]; then
+    if [[ "${IN_CONTAINER}" == "yes" ]]; then
+      echo "ERROR: An external MinIO object storage container cannot be used as cache within a container"
+      echo "       Use \"folder\" or \"no\" caching instead of \"MinIO\""
+      ${EXIT_CMD} 1
+    fi
+    # MinIO requires podman
     if command -v podman &> /dev/null; then
       # Check podman version
       ((VERBOSE > 0)) && podman version
@@ -964,17 +987,7 @@ if [[ ! -d "${SPACK_BUILD_PATH}" ]]; then
       if ((PODMAN_VERSION < 4)); then
         echo "WARNING: Outdated podman version $(podman version --format '{{.Client.Version}}') found"
       fi
-      HAS_PODMAN="yes"
-    else
-      echo "INFO: podman was not found"
-      echo "      Install the package podman to take advantage of a local spack cache"
-      echo "      This accelerates a rebuild of the CP2K dependencies, significantly"
-    fi
-  fi
-
-  # Start Spack cache if we are not within a container and have podman available
-  if [[ "${IN_CONTAINER}" == "no" ]] && [[ "${DISABLE_LOCAL_CACHE}" == "no" ]]; then
-    if [[ "${HAS_PODMAN}" == "yes" ]]; then
+      export SPACK_CACHE="${SPACK_CACHE:-s3://spack-cache --s3-endpoint-url=http://localhost:9000}"
       if ! "${CP2K_ROOT}"/tools/docker/spack_cache_start.sh; then
         echo "ERROR: Could not start (new) spack cache"
         echo ""
@@ -985,16 +998,25 @@ if [[ ! -d "${SPACK_BUILD_PATH}" ]]; then
         echo "log_driver = \"k8s-file\""
         ${EXIT_CMD} 1
       fi
+    else
+      echo "INFO: podman was not found"
+      echo "      Install the package podman to use an MinIO object storage as cache"
+      echo "      This accelerates a rebuild of the CP2K dependencies, significantly"
+      echo "      The folder ${SPACK_CACHE} will be used as cache"
+      USE_CACHE="folder"
     fi
   fi
 
-  # Add local spack cache if possible
-  if [[ "${DISABLE_LOCAL_CACHE}" == "no" ]]; then
-    export SPACK_CACHE=${SPACK_CACHE:-"s3://spack-cache --s3-endpoint-url=http://localhost:9000"}
+  # Initialize Spack shell hooks
+  # shellcheck source=/dev/null
+  source "${SPACK_ROOT}/share/spack/setup-env.sh"
+
+  # Add spack cache as mirror if possible
+  if [[ "${USE_CACHE}" == @("folder"|"minio") ]]; then
     echo "SPACK_CACHE = \"${SPACK_CACHE}\""
     spack mirror list
     if ! spack mirror list | grep -q "local-cache"; then
-      echo "Setting up local spack cache"
+      echo "Setting up spack cache"
       if ((VERBOSE > 0)); then
         "${CP2K_ROOT}"/tools/docker/scripts/setup_spack_cache.sh
       else
@@ -1002,7 +1024,7 @@ if [[ ! -d "${SPACK_BUILD_PATH}" ]]; then
       fi
     fi
   else
-    echo "INFO: A local Spack cache is NOT used"
+    echo "INFO: A spack cache is NOT used"
   fi
 
   # Prepare the CP2K spack configuration file
@@ -1165,7 +1187,10 @@ if [[ ! -d "${SPACK_BUILD_PATH}" ]]; then
         if ! spack compiler remove "gcc@${GCC_VERSION}"; then
           echo -e "\nERROR: Removing the gcc@${GCC_VERSION} compiler failed"
           ${EXIT_CMD} 1
+        else
+          echo -e "\nINFO: gcc@${GCC_VERSION} compiler removed"
         fi
+        spack compiler list
       fi
     fi
     if ! spack -e "${CP2K_ENV}" --no-user-config --no-system-config concretize --fresh --jobs $((NUM_PROCS)); then
@@ -1353,6 +1378,32 @@ if ((EXIT_CODE != 0)); then
   ${EXIT_CMD} "${EXIT_CODE}"
 fi
 
+# Install Skala resource files if needed
+export GAUXC_SKALA_MODEL="(not available)"
+GAUXC_PATH="share/gauxc/onedft_models"
+GAUXC_PREFIX="$(spack location -i gauxc)"
+GAUXC_MODEL_SOURCE_PATH="${GAUXC_PREFIX%/}/${GAUXC_PATH}"
+if [[ -d "${GAUXC_MODEL_SOURCE_PATH}" ]]; then
+  GAUXC_MODEL_TARGET_PATH="${INSTALL_PREFIX%/}/${GAUXC_PATH}"
+  mkdir -p "${GAUXC_MODEL_TARGET_PATH}"
+  if compgen -G "${GAUXC_MODEL_SOURCE_PATH}/*.fun" > /dev/null; then
+    cp "${GAUXC_MODEL_SOURCE_PATH}"/*.fun "${GAUXC_MODEL_TARGET_PATH}/"
+  else
+    echo -e "\nERROR: No GauXC model files found in source folder ${GAUXC_MODEL_SOURCE_PATH}"
+    ${EXIT_CMD} 1
+  fi
+  shopt -s nullglob
+  MATCHES=("${GAUXC_MODEL_TARGET_PATH}"/skala*)
+  shopt -u nullglob
+  if ((${#MATCHES[@]} > 0)); then
+    export GAUXC_SKALA_MODEL="${MATCHES[${#MATCHES[@]} - 1]}"
+  else
+    echo -e "\nERROR: Failed to resolve GAUXC_SKALA_MODEL in target path ${GAUXC_MODEL_TARGET_PATH}"
+    ${EXIT_CMD} 1
+  fi
+fi
+echo -e "\nGAUXC_SKALA_MODEL = ${GAUXC_SKALA_MODEL}"
+
 # Collect and compress all log files when building within a container
 if [[ "${IN_CONTAINER}" == "yes" ]]; then
   if ! cat "${CMAKE_BUILD_PATH}"/cmake.log \
@@ -1457,22 +1508,33 @@ export LAUNCH_SCRIPT
 cat << *** > "${LAUNCH_SCRIPT}"
 #!/bin/bash
 ulimit -c 0 -s unlimited
-export LSAN_OPTIONS=suppressions=${INSTALL_PREFIX}/bin/lsan.supp
+export ASAN_OPTIONS="detect_leaks=1"
+export LSAN_OPTIONS="suppressions=${INSTALL_PREFIX}/bin/lsan.supp"
 export PATH=${INSTALL_PREFIX}/bin:${PATH}
 export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}
 export OMP_NUM_THREADS=\${OMP_NUM_THREADS:-2}
 export OMP_STACKSIZE=256M
 ${OMPI_VARS}
+export GAUXC_SKALA_MODEL=${GAUXC_SKALA_MODEL}
 exec "\$@"
 ***
 chmod 750 "${LAUNCH_SCRIPT}"
 
 # Create shortcut for launching the regression tests
 cat << *** > "${INSTALL_PREFIX}"/bin/run_tests
+#!/bin/bash
+if [[ "${VERSION}" =~ ^(s|p)dbg$ ]]; then
+  echo "ASAN_OPTIONS = \${ASAN_OPTIONS}"
+  echo "LSAN_OPTIONS = \${LSAN_OPTIONS}"
+fi
 ldd -- ${INSTALL_PREFIX}/bin/cp2k.${VERSION} 2>&1 | grep -E 'not ' | sort | uniq
+export GAUXC_SKALA_MODEL=${GAUXC_SKALA_MODEL}
 ${CP2K_ROOT}/tests/do_regtest.py ${TESTOPTS} \$* ${INSTALL_PREFIX}/bin ${VERSION}
 ***
 chmod 750 "${INSTALL_PREFIX}"/bin/run_tests
+
+# Set image tag if available
+export IMAGE_TAG=${IMAGE_TAG:-<IMAGE ID>}
 
 # Optionally, launch test run
 if [[ "${RUN_TEST}" == "yes" ]]; then
@@ -1492,14 +1554,14 @@ else
     fi
     echo ""
     echo "*** A regression test run can be launched with"
-    echo "    podman run -it${DEVICE_FLAG} --rm <IMAGE ID> run_tests"
+    echo "    podman run -it${DEVICE_FLAG} --rm ${IMAGE_TAG} run_tests"
     echo ""
-    if [[ "${VERSION}" == "ssmp" ]]; then
-      echo "*** A CP2K run using 8 OpenMP threads (default) can be launched with"
-      echo "    podman run -it${DEVICE_FLAG} --rm <IMAGE ID> cp2k ${CP2K_ROOT}/benchmarks/CI/H2O-32_md.inp"
+    if [[ "${VERSION}" == @(sdbg|ssmp) ]]; then
+      echo "*** A CP2K run using 2 OpenMP threads (default) can be launched with"
+      echo "    podman run -it${DEVICE_FLAG} --rm ${IMAGE_TAG} cp2k ${CP2K_ROOT}/benchmarks/CI/H2O-32_md.inp"
     else
       echo "*** An MPI-parallel CP2K run using 2 OpenMP threads for each of the 4 MPI ranks can be launched with"
-      echo "    podman run -it${DEVICE_FLAG} --rm <IMAGE ID> mpiexec -n 4 ${ENV_VAR_FLAG} OMP_NUM_THREADS=2 cp2k ${CP2K_ROOT}/benchmarks/CI/H2O-32_md.inp"
+      echo "    podman run -it${DEVICE_FLAG} --rm ${IMAGE_TAG} mpiexec -n 4 ${ENV_VAR_FLAG} OMP_NUM_THREADS=2 cp2k ${CP2K_ROOT}/benchmarks/CI/H2O-32_md.inp"
     fi
     echo ""
   else
@@ -1507,8 +1569,8 @@ else
     echo "*** A regression test run can be launched with"
     echo "    ${LAUNCH_SCRIPT} run_tests"
     echo ""
-    if [[ "${VERSION}" == "ssmp" ]]; then
-      echo "*** A CP2K run using 8 OpenMP threads (default) can be launched with"
+    if [[ "${VERSION}" == @(sdbg|ssmp) ]]; then
+      echo "*** A CP2K run using 2 OpenMP threads (default) can be launched with"
       echo "    ${LAUNCH_SCRIPT} cp2k ${CP2K_ROOT}/benchmarks/CI/H2O-32_md.inp"
       echo ""
       echo "*** A CP2K run using only 4 OpenMP threads can be launched with"

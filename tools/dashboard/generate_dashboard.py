@@ -169,7 +169,7 @@ def gen_frontpage(
 
     now = datetime.utcnow().replace(microsecond=0)
 
-    for s in sorted(config.sections(), key=lambda s: config.getint(s, "sortkey")):
+    for s in config.sections():
         print("Working on summary entry of: " + s)
         name = config.get(s, "name")
         host = config.get(s, "host")
@@ -581,7 +581,6 @@ def html_header(title: str) -> str:
 def html_linkbox() -> str:
     output = '<div class="sidebox">\n'
     output += "<h2>More...</h2>\n"
-    output += '<a href="regtest_survey.html">Regtest Survey</a><br>\n'
     output += '<a href="https://www.cp2k.org/static/coverage/">Test Coverage</a><br>\n'
     output += '<a href="discontinued_tests.html">Discontinued Tests</a><br>\n'
     output += '<a href="https://www.cp2k.org/dev:compiler_support/">Supported compilers</a><br>\n'

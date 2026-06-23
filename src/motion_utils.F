@@ -293,6 +293,7 @@ CONTAINS
 
       CHARACTER(LEN=1024)                                :: cell_str, title
       CHARACTER(LEN=4)                                   :: id_dcd
+      CHARACTER(LEN=5)                                   :: pbc_str
       CHARACTER(LEN=80), DIMENSION(2)                    :: remark
       CHARACTER(LEN=default_string_length) :: etot_str, id_extxyz, id_label, id_wpc, my_act, &
          my_ext, my_form, my_middle, my_pk_name, my_pos, section_ref, step_str, time_str, unit_str
@@ -364,6 +365,10 @@ CONTAINS
       END IF
       particle_set => my_particles%els
       nat = my_particles%n_els
+      pbc_str = "F F F"
+      IF (cell%perd(1) == 1) pbc_str(1:1) = "T"
+      IF (cell%perd(2) == 1) pbc_str(3:3) = "T"
+      IF (cell%perd(3) == 1) pbc_str(5:5) = "T"
 
       ! Gather units of measure for output (if available)
       IF (TRIM(my_pk_name) /= "FORCE_MIXING_LABELS") THEN
@@ -413,13 +418,14 @@ CONTAINS
             END IF
          CASE (dump_extxyz)
             CALL section_vals_val_get(root_section, "MOTION%PRINT%TRAJECTORY%PRINT_ATOM_KIND", l_val=print_kind)
-            WRITE (UNIT=cell_str, FMT="(9(1X,F10.3))") cell%hmat(:, 1)*angstrom, cell%hmat(:, 2)*angstrom, cell%hmat(:, 3)*angstrom
+            WRITE (UNIT=cell_str, FMT="(9(1X,F19.10))") cell%hmat(:, 1)*angstrom, cell%hmat(:, 2)*angstrom, cell%hmat(:, 3)*angstrom
             WRITE (UNIT=step_str, FMT="(I8)") it
             WRITE (UNIT=time_str, FMT="(F12.3)") time
             WRITE (UNIT=etot_str, FMT="(F20.10)") etot
             WRITE (UNIT=title, FMT="(A)") &
                'Lattice="'//TRIM(ADJUSTL(cell_str))//'"'// &
-               ' Properties="species:S:1:'//TRIM(id_extxyz)//':R:3"'// &
+               ' Properties=species:S:1:'//TRIM(id_extxyz)//':R:3'// &
+               ' pbc="'//pbc_str//'"'// &
                ' Step='//TRIM(ADJUSTL(step_str))// &
                ' Time='//TRIM(ADJUSTL(time_str))// &
                ' Energy='//TRIM(ADJUSTL(etot_str))

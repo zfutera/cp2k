@@ -261,7 +261,6 @@ CONTAINS
          END SUBROUTINE offload_create_buffer_c
       END INTERFACE
       INTERFACE
-
          FUNCTION offload_get_buffer_host_pointer_c(buffer) &
             BIND(C, name="offload_get_buffer_host_pointer")
             IMPORT :: C_PTR
@@ -274,6 +273,7 @@ CONTAINS
 
       IF (ASSOCIATED(buffer%host_buffer)) THEN
          IF (SIZE(buffer%host_buffer) == 0) DEALLOCATE (buffer%host_buffer)
+         IF (ASSOCIATED(buffer%host_buffer)) NULLIFY (buffer%host_buffer)
       END IF
 
       CALL offload_create_buffer_c(length=length, buffer=buffer%c_ptr)

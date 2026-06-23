@@ -6,10 +6,11 @@
 !--------------------------------------------------------------------------------------------------!
 
 MODULE post_scf_bandstructure_methods
+   USE floquet_main,                    ONLY: floquet
    USE gw_main,                         ONLY: gw
    USE input_section_types,             ONLY: section_vals_type
    USE post_scf_bandstructure_utils,    ONLY: create_and_init_bs_env,&
-                                              dos_pdos_ldos,&
+                                              eval_bandstructure_properties,&
                                               soc
    USE qs_environment_types,            ONLY: qs_environment_type
    USE qs_scf,                          ONLY: scf
@@ -56,7 +57,12 @@ CONTAINS
       END IF
 
       ! density of states (DOS), projected DOS, local DOS for DFT, DFT+SOC, G0W0, G0W0+SOC
-      CALL dos_pdos_ldos(qs_env, qs_env%bs_env)
+      CALL eval_bandstructure_properties(qs_env, qs_env%bs_env)
+
+      ! Floquet Hamiltonian Diagonalization and calculation of Floquet Density of States
+      IF (qs_env%bs_env%do_floquet) THEN
+         CALL floquet(qs_env, qs_env%bs_env)
+      END IF
 
       CALL timestop(handle)
 

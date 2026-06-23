@@ -28,7 +28,8 @@ MODULE input_cp2k_subsys
    USE cp_output_handling, ONLY: cp_print_key_section_create, debug_print_level, &
                                  high_print_level, medium_print_level
    USE cp_units, ONLY: cp_unit_to_cp2k
-   USE input_constants, ONLY: do_add, do_bondparm_covalent, do_bondparm_vdw, &
+   USE input_constants, ONLY: canonicalize_cell_auto, canonicalize_cell_false, &
+                              canonicalize_cell_true, do_add, do_bondparm_covalent, do_bondparm_vdw, &
                               do_cell_cif, do_cell_cp2k, do_cell_xsc, &
                               do_cell_extxyz, do_cell_pdb, &
                               do_conn_amb7, do_conn_g87, do_conn_g96, &
@@ -198,6 +199,29 @@ CONTAINS
                                         "Alias for Extended XYZ", &
                                         "Cell info in the `CRYST1` record of PDB format"), &
                           default_i_val=do_cell_cp2k)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="CANONICALIZE", &
+                          description="Policy for transforming a general input cell to CP2K's internal "// &
+                          "convention that A lies along the X-axis and B is in the XY plane. AUTO is "// &
+                          "conservative and keeps the input orientation when a silent transformation "// &
+                          "could affect Cartesian or direction-dependent input. TRUE explicitly requests "// &
+                          "canonicalization and transforms supported cell-dependent input. FALSE always "// &
+                          "keeps the input orientation.", &
+                          usage="CANONICALIZE AUTO", &
+                          enum_c_vals=s2a("AUTO", "TRUE", "FALSE", "T", "F", ".TRUE.", ".FALSE."), &
+                          enum_i_vals=[canonicalize_cell_auto, canonicalize_cell_true, &
+                                       canonicalize_cell_false, canonicalize_cell_true, canonicalize_cell_false, &
+                                       canonicalize_cell_true, canonicalize_cell_false], &
+                          enum_desc=s2a("Keep the input orientation unless canonicalization is unambiguously safe", &
+                                        "Explicitly canonicalize the input cell", &
+                                        "Keep the input cell orientation", &
+                                        "Alias for TRUE", &
+                                        "Alias for FALSE", &
+                                        "Alias for TRUE", &
+                                        "Alias for FALSE"), &
+                          default_i_val=canonicalize_cell_auto, lone_keyword_i_val=canonicalize_cell_true)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -1059,7 +1083,8 @@ CONTAINS
       CPASSERT(.NOT. ASSOCIATED(section))
 
       CALL section_create(section, __LOCATION__, name="KIND", &
-                          description="The description of the kind of the atoms (mostly for QM)", &
+                          description="Defines settings shared by atoms of the same kind, such as basis sets, "// &
+                          "pseudopotentials, all-electron treatment, and atom-centered grids.", &
                           n_keywords=20, n_subsections=1, repeats=.TRUE.)
 
       NULLIFY (keyword)
@@ -1071,8 +1096,8 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="BASIS_SET", &
-                          description="The primary Gaussian basis set (NONE implies no basis used, meaningful with GHOST). "// &
-                          "Defaults are set for TYPE {ORB} and FORM {GTO}. Possible values for TYPE are "// &
+                          description="Selects a Gaussian basis set for this kind. The default type is ORB and the default "// &
+                          "form is GTO; NONE implies no basis and is meaningful for ghost atoms. Possible values for TYPE are "// &
                           "{ORB, AUX, MIN, RI_AUX, LRI, ...}. Possible values for "// &
                           "FORM are {GTO, STO}. Where STO results in a GTO expansion of a Slater type basis. "// &
                           "If a value for FORM is given, also TYPE has to be set explicitly.", &
@@ -1185,8 +1210,13 @@ CONTAINS
 
       CALL keyword_create(keyword, __LOCATION__, name="POTENTIAL", &
                           variants=["POT"], &
-                          description="The type (ECP, ALL, GTH, UPS) and name of the pseudopotential for the defined kind.", &
-                          usage="POTENTIAL [type] <POTENTIAL-NAME>", type_of_var=char_t, default_c_vals=[" ", " "], &
+                          description= &
+                          "The type (ECP, ALL, GTH, UPS) and name of the "// &
+                          "pseudopotential for the defined kind. Use GTH potentials "// &
+                          "for most GPW calculations, ECP for Gaussian-integral effective core "// &
+                          "potentials, and ALL for all-electron calculations.", &
+                          usage="POTENTIAL [type] <POTENTIAL-NAME>", type_of_var=char_t, &
+                          default_c_vals=[" ", " "], &
                           citations=[Goedecker1996, Hartwigsen1998, Krack2005], n_var=-1)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -1251,15 +1281,15 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="LEBEDEV_GRID", &
-                          description="The number of points for the angular part of "// &
-                          "the local grid (GAPW)", &
+                          description="GAPW: size of the angular Lebedev grid used for "// &
+                          "atom-centered integrations for this kind.", &
                           usage="LEBEDEV_GRID 40", default_i_val=50)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="RADIAL_GRID", &
-                          description="The number of points for the radial part of "// &
-                          "the local grid (GAPW)", &
+                          description="GAPW: number of radial grid points used for atom-centered "// &
+                          "integrations for this kind.", &
                           usage="RADIAL_GRID 70", default_i_val=50)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -1845,6 +1875,10 @@ CONTAINS
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
 
+      CALL create_fragments_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
    END SUBROUTINE create_topology_section
 
 ! **************************************************************************************************
@@ -1909,6 +1943,42 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
    END SUBROUTINE create_center_section
+
+! **************************************************************************************************
+!> \brief Specify keywords used to setup several fragments
+!> \param section the section to create
+! **************************************************************************************************
+   SUBROUTINE create_fragments_section(section)
+      TYPE(section_type), POINTER                        :: section
+
+      TYPE(keyword_type), POINTER                        :: keyword
+      TYPE(section_type), POINTER                        :: subsection, subsubsection
+
+      CPASSERT(.NOT. ASSOCIATED(section))
+      NULLIFY (keyword, subsection, subsubsection)
+      CALL section_create(section, __LOCATION__, name="FRAGMENTS", &
+                          description="Specify the fragments of a full system.", &
+                          n_keywords=1, n_subsections=0, repeats=.FALSE.)
+
+      CALL section_create(subsection, __LOCATION__, name="FRAGMENT", &
+                          description="Specify information about the fragments.", &
+                          n_keywords=1, n_subsections=0, repeats=.TRUE.)
+
+      CALL keyword_create(keyword, __LOCATION__, &
+                          name="FRAG_RANGE", &
+                          variants=s2a("RANGE"), &
+                          description="Defines fragments. This keyword can be repeated.", &
+                          repeats=.FALSE., &
+                          n_var=-1, &
+                          type_of_var=integer_t, &
+                          usage="FRAG_RANGE 1 5")
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
+   END SUBROUTINE create_fragments_section
 
 ! **************************************************************************************************
 !> \brief Specify keywords used to setup several molecules with few connectivity files

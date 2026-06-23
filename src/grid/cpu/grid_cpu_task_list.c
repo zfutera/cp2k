@@ -17,6 +17,7 @@
 #include "grid_cpu_collocate.h"
 #include "grid_cpu_integrate.h"
 #include "grid_cpu_task_list.h"
+#include "grid_cpu_task_list_internal.h"
 
 /*******************************************************************************
  * \brief Comperator passed to qsort to compare two tasks.
@@ -59,7 +60,8 @@ void grid_cpu_create_task_list(
     grid_cpu_free_task_list(*task_list_out);
   }
 
-  grid_cpu_task_list *task_list = malloc(sizeof(grid_cpu_task_list));
+  grid_cpu_task_list_internal *task_list =
+      malloc(sizeof(grid_cpu_task_list_internal));
   assert(task_list != NULL);
 
   task_list->orthorhombic = orthorhombic;
@@ -100,6 +102,7 @@ void grid_cpu_create_task_list(
   size = ntasks * sizeof(grid_cpu_task);
   task_list->tasks = malloc(size);
   assert(task_list->tasks != NULL || size == 0);
+#pragma omp parallel for schedule(static) if (ntasks > GRID_OMP_MIN_ITERATIONS)
   for (int i = 0; i < ntasks; i++) {
     task_list->tasks[i].level = level_list[i];
     task_list->tasks[i].iatom = iatom_list[i];
@@ -142,7 +145,10 @@ void grid_cpu_create_task_list(
   assert(task_list->first_level_block_task != NULL || size == 0);
   task_list->last_level_block_task = malloc(size);
   assert(task_list->last_level_block_task != NULL || size == 0);
-  for (int i = 0; i < nlevels * nblocks; i++) {
+  const int nlevel_blocks = nlevels * nblocks;
+#pragma omp parallel for schedule(static) if (nlevel_blocks >                  \
+                                                  GRID_OMP_MIN_ITERATIONS)
+  for (int i = 0; i < nlevel_blocks; i++) {
     task_list->first_level_block_task[i] = 0;
     task_list->last_level_block_task[i] = -1; // last < first means no tasks
   }
@@ -179,7 +185,12 @@ void grid_cpu_create_task_list(
  * \brief Deallocates given task list, basis_sets have to be freed separately.
  * \author Ole Schuett
  ******************************************************************************/
-void grid_cpu_free_task_list(grid_cpu_task_list *task_list) {
+void grid_cpu_free_task_list(grid_cpu_task_list *ptr) {
+  if (ptr == NULL)
+    return;
+
+  grid_cpu_task_list_internal *task_list = (grid_cpu_task_list_internal *)ptr;
+
   free(task_list->block_offsets);
   free(task_list->atom_positions);
   free(task_list->atom_kinds);
@@ -264,11 +275,16 @@ static void load_pab(const grid_basis_set *ibasis, const grid_basis_set *jbasis,
  * \author Ole Schuett
  ******************************************************************************/
 static void collocate_one_grid_level(
-    const grid_cpu_task_list *task_list, const int *first_block_task,
+    const grid_cpu_task_list *ptr, const int *first_block_task,
     const int *last_block_task, const enum grid_func func,
     const int npts_global[3], const int npts_local[3], const int shift_local[3],
     const int border_width[3], const double dh[3][3], const double dh_inv[3][3],
     const double *pab_blocks, offload_buffer *grid) {
+
+  if (ptr == NULL)
+    return;
+
+  grid_cpu_task_list_internal *task_list = (grid_cpu_task_list_internal *)ptr;
 
 // Using default(shared) because with GCC 9 the behavior around const changed:
 // https://www.gnu.org/software/gcc/gcc-9/porting_to.html
@@ -391,6 +407,7 @@ static void collocate_one_grid_level(
       const int64_t ub =
           ((int64_t)npts_local_total * (rank + 1)) / actual_group_size;
       if (src_thread < nthreads) {
+        GRID_PRAGMA_SIMD_LOOP
         for (int i = (int)lb; i < (int)ub; i++) {
           task_list->threadlocals[dest_thread][i] +=
               task_list->threadlocals[src_thread][i];
@@ -402,6 +419,7 @@ static void collocate_one_grid_level(
     // Copy final result from first thread into shared grid.
     const int64_t lb = ((int64_t)npts_local_total * ithread) / nthreads;
     const int64_t ub = ((int64_t)npts_local_total * (ithread + 1)) / nthreads;
+    GRID_PRAGMA_SIMD_LOOP
     for (int i = (int)lb; i < (int)ub; i++) {
       grid->host_buffer[i] = task_list->threadlocals[0][i];
     }
@@ -414,11 +432,14 @@ static void collocate_one_grid_level(
  *        See grid_task_list.h for details.
  * \author Ole Schuett
  ******************************************************************************/
-void grid_cpu_collocate_task_list(const grid_cpu_task_list *task_list,
+void grid_cpu_collocate_task_list(const grid_cpu_task_list *ptr,
                                   const enum grid_func func, const int nlevels,
                                   const offload_buffer *pab_blocks,
                                   offload_buffer *grids[nlevels]) {
+  if (ptr == NULL)
+    return;
 
+  grid_cpu_task_list_internal *task_list = (grid_cpu_task_list_internal *)ptr;
   assert(task_list->nlevels == nlevels);
 
   for (int level = 0; level < task_list->nlevels; level++) {
@@ -481,12 +502,17 @@ static inline void store_hab(const grid_basis_set *ibasis,
  * \author Ole Schuett
  ******************************************************************************/
 static void integrate_one_grid_level(
-    const grid_cpu_task_list *task_list, const int *first_block_task,
+    const grid_cpu_task_list *ptr, const int *first_block_task,
     const int *last_block_task, const bool compute_tau, const int natoms,
     const int npts_global[3], const int npts_local[3], const int shift_local[3],
     const int border_width[3], const double dh[3][3], const double dh_inv[3][3],
     const offload_buffer *pab_blocks, const offload_buffer *grid,
     offload_buffer *hab_blocks, double forces[natoms][3], double virial[3][3]) {
+
+  if (ptr == NULL)
+    return;
+
+  grid_cpu_task_list_internal *task_list = (grid_cpu_task_list_internal *)ptr;
 
 // Using default(shared) because with GCC 9 the behavior around const changed:
 // https://www.gnu.org/software/gcc/gcc-9/porting_to.html
@@ -630,10 +656,15 @@ static void integrate_one_grid_level(
  * \author Ole Schuett
  ******************************************************************************/
 void grid_cpu_integrate_task_list(
-    const grid_cpu_task_list *task_list, const bool compute_tau,
-    const int natoms, const int nlevels, const offload_buffer *pab_blocks,
+    const grid_cpu_task_list *ptr, const bool compute_tau, const int natoms,
+    const int nlevels, const offload_buffer *pab_blocks,
     const offload_buffer *grids[nlevels], offload_buffer *hab_blocks,
     double forces[natoms][3], double virial[3][3]) {
+
+  if (ptr == NULL)
+    return;
+
+  grid_cpu_task_list_internal *task_list = (grid_cpu_task_list_internal *)ptr;
 
   assert(task_list->nlevels == nlevels);
   assert(task_list->natoms == natoms);

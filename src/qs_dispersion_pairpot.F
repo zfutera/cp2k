@@ -16,14 +16,9 @@ MODULE qs_dispersion_pairpot
                                               get_atomic_kind_set
    USE atprop_types,                    ONLY: atprop_array_init,&
                                               atprop_type
-   USE bibliography,                    ONLY: Caldeweyher2017,&
-                                              Caldeweyher2019,&
-                                              Caldeweyher2020,&
-                                              Goerigk2017,&
-                                              cite_reference,&
-                                              grimme2006,&
-                                              grimme2010,&
-                                              grimme2011
+   USE bibliography,                    ONLY: &
+        Caldeweyher2017, Caldeweyher2019, Caldeweyher2020, Goerigk2017, Wittmann2024, &
+        cite_reference, grimme2006, grimme2010, grimme2011
    USE cell_types,                      ONLY: cell_type
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_get_default_io_unit,&
@@ -61,6 +56,7 @@ MODULE qs_dispersion_pairpot
    USE qs_dispersion_d3,                ONLY: calculate_dispersion_d3_pairpot,&
                                               dftd3_c6_param
    USE qs_dispersion_d4,                ONLY: calculate_dispersion_d4_pairpot
+   USE qs_dispersion_s_dftd3,           ONLY: dftd3_param_from_library
    USE qs_dispersion_types,             ONLY: dftd2_pp,&
                                               dftd3_pp,&
                                               dftd4_pp,&
@@ -106,7 +102,7 @@ CONTAINS
 
       CHARACTER(LEN=2)                                   :: symbol
       CHARACTER(LEN=default_path_length)                 :: filename
-      CHARACTER(LEN=default_string_length)               :: aname
+      CHARACTER(LEN=default_string_length)               :: aname, error_msg
       CHARACTER(LEN=default_string_length), &
          DIMENSION(:), POINTER                           :: tmpstringlist
       INTEGER                                            :: elem, handle, i, ikind, j, max_elem, &
@@ -204,8 +200,9 @@ CONTAINS
             CALL cite_reference(Grimme2010)
             CALL cite_reference(Grimme2011)
             CALL cite_reference(Goerigk2017)
-            max_elem = 94
-            maxc = 5
+            CALL cite_reference(Wittmann2024)
+            max_elem = 103
+            maxc = 7
             dispersion_env%max_elem = max_elem
             dispersion_env%maxc = maxc
             ALLOCATE (dispersion_env%maxci(max_elem))
@@ -216,10 +213,24 @@ CONTAINS
             ALLOCATE (dispersion_env%r2r4(max_elem))
             ALLOCATE (dispersion_env%cn(max_elem))
 
-            ! get filename of parameter file
-            filename = dispersion_env%parameter_file_name
-            CALL dftd3_c6_param(dispersion_env%c6ab, dispersion_env%maxci, filename, para_env)
-            CALL setr0ab(dispersion_env%r0ab, dispersion_env%rcov, dispersion_env%r2r4)
+            IF (dispersion_env%d3_reference_code) THEN
+               CALL dftd3_param_from_library(dispersion_env%c6ab, dispersion_env%maxci, &
+                                             dispersion_env%r0ab, dispersion_env%rcov, &
+                                             dispersion_env%r2r4, &
+                                             dispersion_env%pp_type, dispersion_env%ref_functional, &
+                                             dispersion_env%s6, dispersion_env%s8, &
+                                             dispersion_env%a1, dispersion_env%a2, &
+                                             dispersion_env%sr6, para_env, error=error_msg, &
+                                             calc_scaling=.NOT. dispersion_env%d3_scaling_explicit)
+               IF (error_msg /= "") THEN
+                  CALL cp_abort(__LOCATION__, error_msg)
+               END IF
+            ELSE
+               filename = dispersion_env%parameter_file_name
+               CALL dftd3_c6_param(dispersion_env%c6ab, dispersion_env%maxci, filename, para_env)
+               CALL setrcov(dispersion_env%rcov)
+               CALL setr0ab(dispersion_env%r0ab, dispersion_env%rcov, dispersion_env%r2r4)
+            END IF
             ! Electronegativity
             CALL seten(dispersion_env%eneg)
             ! the default coordination numbers
@@ -230,11 +241,13 @@ CONTAINS
             ! c8 for he, ne and ar. for larger Z, C8 becomes too large
             ! which effectively mimics higher R^n terms neglected due
             ! to stability reasons
-            DO i = 1, max_elem
-               dum = 0.5_dp*dispersion_env%r2r4(i)*REAL(i, dp)**0.5_dp
-               ! store it as sqrt because the geom. av. is taken
-               dispersion_env%r2r4(i) = SQRT(dum)
-            END DO
+            IF (.NOT. dispersion_env%d3_reference_code) THEN
+               DO i = 1, max_elem
+                  dum = 0.5_dp*dispersion_env%r2r4(i)*REAL(i, dp)**0.5_dp
+                  ! store it as sqrt because the geom. av. is taken
+                  dispersion_env%r2r4(i) = SQRT(dum)
+               END DO
+            END IF
             ! parameters
             dispersion_env%k1 = 16.0_dp
             dispersion_env%k2 = 4._dp/3._dp
@@ -246,7 +259,9 @@ CONTAINS
             ! which is physically not right
             ! values >5 might lead to bumps in the potential
             dispersion_env%k3 = -4._dp
-            dispersion_env%rcov = dispersion_env%k2*dispersion_env%rcov*bohr
+            IF (.NOT. dispersion_env%d3_reference_code) THEN
+               dispersion_env%rcov = dispersion_env%k2*dispersion_env%rcov*bohr
+            END IF
             ! alpha default parameter
             dispersion_env%alp = 14._dp
             !
@@ -254,7 +269,7 @@ CONTAINS
                CALL get_atomic_kind(atomic_kind_set(ikind), element_symbol=symbol, z=elem)
                ALLOCATE (disp)
                disp%type = dftd3_pp
-               IF (elem <= 94) THEN
+               IF (elem <= max_elem) THEN
                   disp%defined = .TRUE.
                ELSE
                   disp%defined = .FALSE.
@@ -328,8 +343,8 @@ CONTAINS
                CALL set_qs_kind(qs_kind_set(ikind), dispersion=disp)
             END DO
             ! maybe needed in cnumber calculations
-            max_elem = 94
-            maxc = 5
+            max_elem = 103
+            maxc = 7
             dispersion_env%max_elem = max_elem
             dispersion_env%maxc = maxc
             ALLOCATE (dispersion_env%maxci(max_elem))

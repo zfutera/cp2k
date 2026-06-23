@@ -12,27 +12,32 @@
 !> \author fawzi
 ! **************************************************************************************************
 MODULE qs_density_mixing_types
-   USE ao_util,                         ONLY: exp_radius
-   USE input_constants,                 ONLY: broy_mix,&
-                                              direct_p_mix,&
-                                              gaussian,&
-                                              kerker_mix,&
-                                              multisec_mix,&
-                                              no_mix,&
-                                              pulay_mix
-   USE input_keyword_types,             ONLY: keyword_create,&
-                                              keyword_release,&
-                                              keyword_type
-   USE input_section_types,             ONLY: section_add_keyword,&
-                                              section_create,&
-                                              section_type,&
-                                              section_vals_type,&
-                                              section_vals_val_get
-   USE input_val_types,                 ONLY: real_t
-   USE kinds,                           ONLY: default_string_length,&
-                                              dp
-   USE qs_rho_atom_types,               ONLY: rho_atom_coeff
-   USE string_utilities,                ONLY: s2a
+#if defined(__TBLITE)
+   USE tblite_scf, ONLY: mixer_type
+#endif
+   USE ao_util, ONLY: exp_radius
+   USE input_constants, ONLY: broy_mix, &
+                              direct_p_mix, &
+                              gaussian, &
+                              kerker_mix, &
+                              modified_broy_mix, &
+                              multisec_mix, &
+                              new_pulay_mix, &
+                              no_mix, &
+                              pulay_mix
+   USE input_keyword_types, ONLY: keyword_create, &
+                                  keyword_release, &
+                                  keyword_type
+   USE input_section_types, ONLY: section_add_keyword, &
+                                  section_create, &
+                                  section_type, &
+                                  section_vals_type, &
+                                  section_vals_val_get
+   USE input_val_types, ONLY: real_t
+   USE kinds, ONLY: default_string_length, &
+                    dp
+   USE qs_rho_atom_types, ONLY: rho_atom_coeff
+   USE string_utilities, ONLY: s2a
 #include "./base/base_uses.f90"
 
    IMPLICIT NONE
@@ -45,7 +50,9 @@ MODULE qs_density_mixing_types
    INTEGER, PARAMETER, PUBLIC :: no_mixing_nr = 0, direct_mixing_nr = 1, &
                                  gspace_mixing_nr = 2, pulay_mixing_nr = 3, &
                                  broyden_mixing_nr = 4, &
-                                 multisecant_mixing_nr = 6
+                                 modified_broyden_mixing_nr = 5, &
+                                 multisecant_mixing_nr = 6, &
+                                 new_pulay_mixing_nr = 7
    PUBLIC :: cp_1d_z_p_type, mixing_storage_create, mixing_storage_type, mixing_storage_release, create_mixing_section
 
    TYPE cp_1d_z_p_type
@@ -62,7 +69,8 @@ MODULE qs_density_mixing_types
       REAL(KIND=dp)                                     :: alpha = -1.0_dp, bconst = -1.0_dp, beta = -1.0_dp, broy_w0 = -1.0_dp, &
                                                            max_g2 = -1.0_dp, max_gvec_exp = -1.0_dp, pulay_alpha = -1.0_dp, &
                                                            pulay_beta = -1.0_dp, r_step = -1.0_dp, reg_par = -1.0_dp, &
-                                                           sigma_max = -1.0_dp, wc = -1.0_dp, wmax = -1.0_dp
+                                                           sigma_max = -1.0_dp, wc = -1.0_dp, wmax = -1.0_dp, qm = -1.0_dp, &
+                                                           qk = -1.0_dp, qkappa = -1.0_dp
       ! Spin-channel-specific mixing parameters (for nspin==2, ispin=2 is the magnetization channel)
       REAL(KIND=dp)                                     :: alpha_mag = -1.0_dp, beta_mag = -1.0_dp
       REAL(KIND=dp), DIMENSION(:), POINTER              :: p_metric => NULL()
@@ -74,6 +82,9 @@ MODULE qs_density_mixing_types
       REAL(KIND=dp), DIMENSION(:, :, :), POINTER        :: fmat => NULL(), gmat => NULL(), pulay_matrix => NULL(), smat => NULL()
       !
       INTEGER                                           :: nat_local = -1, max_shell = -1
+      INTEGER                                           :: tb_scc_mixer_memory = 0, tb_scc_mixer_natom = 0, &
+                                                           tb_scc_mixer_ns = 0, tb_scc_mixer_step = 0
+      REAL(KIND=dp)                                     :: tb_scc_mixer_error = 0.0_dp
       REAL(KIND=dp), DIMENSION(:, :, :), POINTER        :: acharge => NULL()
       REAL(KIND=dp), DIMENSION(:, :, :), POINTER        :: dacharge => NULL()
       REAL(KIND=dp), DIMENSION(:, :, :), POINTER        :: dfbroy => NULL()
@@ -92,6 +103,9 @@ MODULE qs_density_mixing_types
       TYPE(rho_atom_coeff), DIMENSION(:, :, :), POINTER :: cpc_h_in_buffer => NULL(), cpc_s_in_buffer => NULL()
       TYPE(rho_atom_coeff), DIMENSION(:, :, :), POINTER :: cpc_h_res_buffer => NULL(), cpc_s_res_buffer => NULL()
       TYPE(rho_atom_coeff), DIMENSION(:, :, :), POINTER :: dcpc_h_in => NULL(), dcpc_s_in => NULL()
+#if defined(__TBLITE)
+      CLASS(mixer_type), ALLOCATABLE                    :: tb_scc_mixer
+#endif
    END TYPE mixing_storage_type
 
 CONTAINS
@@ -126,6 +140,11 @@ CONTAINS
       mixing_store%iter_method = "NoMix"
       mixing_store%max_g2 = 2._dp*ecut
       mixing_store%gmix_p = .FALSE.
+      mixing_store%tb_scc_mixer_error = 0.0_dp
+      mixing_store%tb_scc_mixer_memory = 0
+      mixing_store%tb_scc_mixer_natom = 0
+      mixing_store%tb_scc_mixer_ns = 0
+      mixing_store%tb_scc_mixer_step = 0
 
       NULLIFY (mixing_store%p_metric)
       NULLIFY (mixing_store%kerker_factor)
@@ -197,10 +216,21 @@ CONTAINS
       CASE (broyden_mixing_nr)
          CALL section_vals_val_get(mixing_section, "BROY_W0", r_val=mixing_store%broy_w0)
          mixing_store%bconst = 20.0_dp
+      CASE (modified_broyden_mixing_nr)
+         CALL section_vals_val_get(mixing_section, "BROY_W0", r_val=mixing_store%broy_w0)
+         CALL section_vals_val_get(mixing_section, "BROY_WREF", r_val=mixing_store%wc)
+         CALL section_vals_val_get(mixing_section, "BROY_WMAX", r_val=mixing_store%wmax)
+         mixing_store%bconst = 20.0_dp
       CASE (multisecant_mixing_nr)
          CALL section_vals_val_get(mixing_section, "REGULARIZATION", r_val=mixing_store%reg_par)
          CALL section_vals_val_get(mixing_section, "MAX_STEP", r_val=mixing_store%sigma_max)
          CALL section_vals_val_get(mixing_section, "R_FACTOR", r_val=mixing_store%r_step)
+      CASE (new_pulay_mixing_nr)
+         CALL section_vals_val_get(mixing_section, "PULAY_ALPHA", r_val=mixing_store%pulay_alpha)
+         CALL section_vals_val_get(mixing_section, "PULAY_BETA", r_val=mixing_store%pulay_beta)
+         CALL section_vals_val_get(mixing_section, "QM", r_val=mixing_store%qm)
+         CALL section_vals_val_get(mixing_section, "QK", r_val=mixing_store%qk)
+         CALL section_vals_val_get(mixing_section, "QKAPPA", r_val=mixing_store%qkappa)
       END SELECT
 
    END SUBROUTINE mixing_storage_create
@@ -405,6 +435,11 @@ CONTAINS
       IF (ASSOCIATED(mixing_store%atlist)) THEN
          DEALLOCATE (mixing_store%atlist)
       END IF
+#if defined(__TBLITE)
+      IF (ALLOCATED(mixing_store%tb_scc_mixer)) THEN
+         DEALLOCATE (mixing_store%tb_scc_mixer)
+      END IF
+#endif
 
       IF (ASSOCIATED(mixing_store%delta_res)) THEN
          DO i = 1, SIZE(mixing_store%delta_res, 2)
@@ -515,14 +550,22 @@ CONTAINS
                                           "KERKER_MIXING", &
                                           "PULAY_MIXING", &
                                           "BROYDEN_MIXING", &
-                                          "MULTISECANT_MIXING"), &
+                                          "MODIFIED_BROYDEN_MIXING", &
+                                          "MULTISECANT_MIXING", &
+                                          "NEW_PULAY_MIXING"), &
                           enum_i_vals=[no_mix, direct_p_mix, kerker_mix, pulay_mix, broy_mix, &
-                                       multisec_mix], &
+                                       modified_broy_mix, &
+                                       multisec_mix, new_pulay_mix], &
                           enum_desc=s2a("No mixing is applied", &
                                         "Direct mixing of new and old density matrices", &
                                         "Mixing of the potential in reciprocal space using the Kerker damping", &
-                                        "Pulay mixing", "Broyden mixing", &
-                                        "Multisecant scheme for mixing"))
+                                        "Pulay mixing", &
+                                        "Original CP2K Broyden mixing with a constant BROY_W0 regularization", &
+                                        "Modified Broyden mixing with dynamic residual weights controlled by BROY_W0, "// &
+                                        "BROY_WREF, and BROY_WMAX", &
+                                        "Multisecant scheme for mixing", "New Pulay mixing using Sundararaman et al.'s "// &
+                                        "metric and preconditioner, with improved convergence behavior and suitable for "// &
+                                        "grand canonical SCF"))
 
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -605,6 +648,49 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
+      CALL keyword_create(keyword, __LOCATION__, &
+                          name="QM", &
+                          description="The control parameter in the numerator of the Pulay metric "// &
+                          "used in the new Pulay mixing, introduced to suppress charge sloshing: "// &
+                          "Pulay metric: M(g) = (g^2 + qm^2 + qkapa^2)/(g^2 + qkapa^2)", &
+                          repeats=.FALSE., &
+                          n_var=1, &
+                          type_of_var=real_t, &
+                          default_r_val=0.75_dp, &
+                          unit_str="bohr^-1", &
+                          usage="QM 0.75")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, &
+                          name="QK", &
+                          description="The control parameter in the denominator of the Kerker preconditioner "// &
+                          "used in the new Pulay mixing, introduced to suppress charge sloshing: "// &
+                          "Kerker preconditioner: K(g) = alpha * (g^2 + qkapa^2)/(g^2 + qk^2 + qkapa^2)", &
+                          repeats=.FALSE., &
+                          n_var=1, &
+                          type_of_var=real_t, &
+                          default_r_val=3.0_dp, &
+                          unit_str="bohr^-1", &
+                          usage="QK 3.0")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, &
+                          name="QKAPPA", &
+                          description="The control parameter in the numerator and the denominator of "// &
+                          "the Pulay metric and the Kerker preconditioner "// &
+                          "used in the new Pulay mixing, introduced to ensure a finite and well-defined "// &
+                          "Pulay metric at g=0 and a non-zero and well-defined Kerker preconditioner at g=0", &
+                          repeats=.FALSE., &
+                          n_var=1, &
+                          type_of_var=real_t, &
+                          default_r_val=0.25_dp, &
+                          unit_str="bohr^-1", &
+                          usage="QKAPPA 0.25")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
       CALL keyword_create(keyword, __LOCATION__, name="NMIXING", &
                           description="Minimal number of density mixing (should be greater than 0), "// &
                           "before starting DIIS", &
@@ -621,7 +707,11 @@ CONTAINS
 
       CALL keyword_create(keyword, __LOCATION__, &
                           name="BROY_W0", &
-                          description=" w0 parameter used in Broyden mixing", &
+                          description="Regularization weight used in Broyden mixing. For the original "// &
+                          "BROYDEN_MIXING method this is the constant diagonal regularization of the "// &
+                          "small Broyden system. For MODIFIED_BROYDEN_MIXING it is the corresponding "// &
+                          "diagonal regularization of the dynamically weighted Broyden system. "// &
+                          "The default follows tblite.", &
                           repeats=.FALSE., &
                           n_var=1, &
                           type_of_var=real_t, &
@@ -632,23 +722,29 @@ CONTAINS
 
       CALL keyword_create(keyword, __LOCATION__, &
                           name="BROY_WREF", &
-                          description="", &
+                          description="Reference factor for the dynamic residual weight. This keyword "// &
+                          "is only used by MODIFIED_BROYDEN_MIXING; the original BROYDEN_MIXING path "// &
+                          "is unchanged. The effective history weight is proportional to BROY_WREF "// &
+                          "divided by the residual norm, clipped to the interval [1, BROY_WMAX]. "// &
+                          "The default follows tblite.", &
                           repeats=.FALSE., &
                           n_var=1, &
                           type_of_var=real_t, &
-                          default_r_val=100.0_dp, &
-                          usage="BROY_WREF 0.2")
+                          default_r_val=0.01_dp, &
+                          usage="BROY_WREF 0.01")
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, &
                           name="BROY_WMAX", &
-                          description="", &
+                          description="Upper bound for the dynamic residual weight. This keyword is "// &
+                          "only used by MODIFIED_BROYDEN_MIXING; the original BROYDEN_MIXING path is "// &
+                          "unchanged. The lower bound is fixed to 1.0. The default follows tblite.", &
                           repeats=.FALSE., &
                           n_var=1, &
                           type_of_var=real_t, &
-                          default_r_val=30.0_dp, &
-                          usage="BROY_WMAX 10.0")
+                          default_r_val=100000.0_dp, &
+                          usage="BROY_WMAX 100000.0")
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 

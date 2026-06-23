@@ -1,5 +1,5 @@
 # libxsmm is designed for x86_64 architectures only, see project's README
-%bcond libxsmm %[ "%{_arch}" == "x86_64" ]
+# %bcond libxs %[ "%{_arch}" == "x86_64" ]
 
 # Disable LTO due to https://bugzilla.redhat.com/show_bug.cgi?id=2243158
 %global _lto_cflags %nil
@@ -27,10 +27,11 @@ BuildRequires: python3-fypp
 # Project dependencies
 BuildRequires: flexiblas-devel
 BuildRequires: cmake(DBCSR)
+BuildRequires: cmake(libint2)
 BuildRequires: pkgconfig(fftw3)
-%if %{with libxsmm}
-BuildRequires: pkgconfig(libxsmm)
-%endif
+# %if %{with libxs}
+# BuildRequires: pkgconfig(libxsmm)
+# %endif
 # cmake(Libxc) technically fails
 # https://github.com/cp2k/cp2k/issues/3767
 BuildRequires: libxc-devel
@@ -139,14 +140,14 @@ cmake_common_args=(
   "-DCP2K_USE_STATIC_BLAS:BOOL=OFF"
   # Dependencies equivalent with Default
   "-DCP2K_USE_FFTW3:BOOL=ON"
-  "-DCP2K_USE_LIBINT2:BOOL=OFF" # Package has no Fortran interface
+  "-DCP2K_USE_LIBINT2:BOOL=ON"
   "-DCP2K_USE_LIBXC:BOOL=ON"
   "-DCP2K_USE_SPGLIB:BOOL=ON"
-  %if %{with libxsmm}
-  "-DCP2K_USE_LIBXSMM:BOOL=ON"
-  %else
-  "-DCP2K_USE_LIBXSMM:BOOL=OFF"
-  %endif
+  # %if %{with libxs}
+  # "-DCP2K_USE_LIBXS:BOOL=ON"
+  # %else
+  "-DCP2K_USE_LIBXS:BOOL=OFF"
+  # %endif
 )
 for mpi in '' mpich openmpi; do
   if [ -n "$mpi" ]; then
@@ -232,6 +233,7 @@ done
 
 %files
 %{_bindir}/cp2k.ssmp
+%{_bindir}/cp2k.sopt
 %{_bindir}/dbm_miniapp.ssmp
 %{_bindir}/dumpdcd.ssmp
 %{_bindir}/graph.ssmp
@@ -248,6 +250,7 @@ done
 
 %files openmpi
 %{_libdir}/openmpi/bin/cp2k.psmp
+%{_libdir}/openmpi/bin/cp2k.popt
 %{_libdir}/openmpi/bin/dumpdcd.psmp
 %{_libdir}/openmpi/bin/dbm_miniapp.psmp
 %{_libdir}/openmpi/bin/graph.psmp
@@ -264,6 +267,7 @@ done
 
 %files mpich
 %{_libdir}/mpich/bin/cp2k.psmp
+%{_libdir}/mpich/bin/cp2k.popt
 %{_libdir}/mpich/bin/dbm_miniapp.psmp
 %{_libdir}/mpich/bin/dumpdcd.psmp
 %{_libdir}/mpich/bin/graph.psmp

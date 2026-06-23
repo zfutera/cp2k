@@ -550,6 +550,10 @@ CONTAINS
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
 
+      CALL create_gauxc_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
       CALL section_create(subsection, __LOCATION__, name="XWPBE", &
                           description="Uses the short range PBE functional", &
                           n_keywords=0, n_subsections=0, repeats=.FALSE., &
@@ -995,10 +999,11 @@ CONTAINS
       CALL keyword_release(keyword)
       CALL keyword_create(keyword, __LOCATION__, name="REFERENCE_FUNCTIONAL", &
                           description="Use parameters for this specific density functional. "// &
+                          "For available DFT-D4 functionals and parameters see: "// &
+                          "<https://github.com/dftd4/dftd4/blob/main/src/dftd4/param.f90>. "// &
                           "For available D3 and D3(BJ) parameters see: "// &
                           "<https://www.chemie.uni-bonn.de/grimme/de/software/dft-d3>. "// &
-                          "For the defintion of D4 parameters see: "// &
-                          "<https://github.com/dftd4/dftd4>.", &
+                          "For Skala with D3(BJ), SKALA selects the B3LYP D3(BJ) parameters.", &
                           usage="REFERENCE_FUNCTIONAL <functional>", &
                           type_of_var=char_t)
       CALL section_add_keyword(subsection, keyword)
@@ -1017,6 +1022,13 @@ CONTAINS
       CALL keyword_create(keyword, __LOCATION__, name="D4_DEBUG", &
                           description="Debug output for D4 method using reference code.", &
                           usage="D4_DEBUG", default_l_val=.FALSE., &
+                          lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="D3_REFERENCE_CODE", &
+                          description="Use D3 damping parameters from s-dftd3 library instead of built-in values. "// &
+                          "Requires s-dftd3 library to be compiled in.", &
+                          usage="D3_REFERENCE_CODE", default_l_val=.FALSE., &
                           lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
@@ -1284,6 +1296,348 @@ CONTAINS
    END SUBROUTINE create_gcp_potential_section
 
 ! **************************************************************************************************
+!> \brief creates the structure of the GAUXC section
+!> \param section the section that will be created
+!> \author fawzi
+! **************************************************************************************************
+   SUBROUTINE create_gauxc_section(section)
+      TYPE(section_type), POINTER                        :: section
+
+      TYPE(keyword_type), POINTER                        :: keyword
+
+      CPASSERT(.NOT. ASSOCIATED(section))
+      CALL section_create(section, __LOCATION__, name="GAUXC", &
+                          description="Use exchange-correlation functionals provided by GauXC. "// &
+                          "The current CP2K bridge uses GauXC's molecular quadrature. Periodic inputs "// &
+                          "are limited to isolated validation cells and are not compact periodic "// &
+                          "material calculations.", &
+                          n_keywords=27, n_subsections=0, repeats=.FALSE.)
+
+      NULLIFY (keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="_SECTION_PARAMETERS_", &
+                          description="activates the functional", &
+                          lone_keyword_l_val=.TRUE., default_l_val=.FALSE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="FUNCTIONAL", &
+                          description="Functional name used to create the GauXC integrator. "// &
+                          "If MODEL is set, this optional base functional defaults to PBE and "// &
+                          "does not need to be specified for MODEL SKALA inputs.", &
+                          default_c_val="PBE")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="MODEL", &
+                          description="GauXC OneDFT model name or path. Use NONE for conventional GauXC. "// &
+                          "MODEL SKALA selects the installed Skala-1.1 model when available; "// &
+                          "other OneDFT models are supplied as .fun files or model names. "// &
+                          "NLCC pseudopotentials are rejected in the molecular GauXC OneDFT/SKALA "// &
+                          "path; use the CP2K-native SKALA grid path for NLCC calculations.", &
+                          usage="MODEL SKALA", &
+                          default_c_val="NONE")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="GRID", &
+                          description="Atomic grid size for GauXC. OneDFT/SKALA defaults to SUPERFINE "// &
+                          "unless this keyword is set explicitly.", &
+                          usage="GRID fine", &
+                          enum_c_vals=s2a("FINE", "ULTRAFINE", "SUPERFINE", "GM3", "GM5"), &
+                          enum_i_vals=[1, 2, 3, 4, 5], &
+                          enum_desc=s2a("Fine grid (default)", &
+                                        "Ultra fine grid", &
+                                        "Super fine grid", &
+                                        "GM3 grid", &
+                                        "GM5 grid"), &
+                          default_i_val=1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="RADIAL_QUADRATURE", &
+                          description="Radial quadrature scheme for GauXC", &
+                          usage="RADIAL_QUADRATURE muraknowles", &
+                          enum_c_vals=s2a("MURAKNOWLES", "BECKE", "TREUTLERAHLRICHS", "MURRAYHANDYLAMING"), &
+                          enum_i_vals=[1, 2, 3, 4], &
+                          enum_desc=s2a("Mura-Knowles radial quadrature (default)", &
+                                        "Becke radial quadrature", &
+                                        "Treutler-Ahlrichs radial quadrature", &
+                                        "Murray-Handy-Laming radial quadrature"), &
+                          default_i_val=1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="PRUNING_SCHEME", &
+                          description="Pruning scheme for GauXC. OneDFT/SKALA defaults to UNPRUNED "// &
+                          "unless this keyword is set explicitly.", &
+                          usage="PRUNING_SCHEME robust", &
+                          enum_c_vals=s2a("ROBUST", "TREUTLER", "UNPRUNED"), &
+                          enum_i_vals=[1, 2, 3], &
+                          enum_desc=s2a("Robust pruning (default)", &
+                                        "Treutler pruning", &
+                                        "Unpruned grid"), &
+                          default_i_val=1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="BATCH_SIZE", &
+                          description="Batch size for GauXC evaluation", &
+                          usage="BATCH_SIZE 512", &
+                          default_i_val=512)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="DEVICE_RUNTIME_FILL_FRACTION", &
+                          description="Fraction of currently available GPU memory preallocated by "// &
+                          "a GauXC device runtime. Lower values leave more memory for OneDFT/SKALA "// &
+                          "Torch inference; this keyword is used only with LB_EXECUTION_SPACE DEVICE.", &
+                          usage="DEVICE_RUNTIME_FILL_FRACTION 0.1", &
+                          default_r_val=0.1_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="ONEDFT_ATOM_CHUNK_SIZE", &
+                          description="Atom chunk size for GauXC OneDFT/SKALA Torch inference. "// &
+                          "A positive value evaluates the Torch model atom block by atom block; "// &
+                          "zero disables chunking; the default leaves GauXC's model-specific policy "// &
+                          "or the GAUXC_ONEDFT_ATOM_CHUNK_SIZE environment variable in control.", &
+                          usage="ONEDFT_ATOM_CHUNK_SIZE 3", &
+                          default_i_val=-1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="PERIODIC_REFERENCE", &
+                          description="Explicitly opt into the limited isolated-cell GauXC reference "// &
+                          "path for periodic CP2K inputs. This path is restricted to Gamma-only, "// &
+                          "single-image METHOD GPW calculations with GTH pseudopotentials and uses "// &
+                          "GauXC's molecular quadrature; compact periodic materials require a "// &
+                          "dedicated periodic GauXC interface.", &
+                          usage="PERIODIC_REFERENCE T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NATIVE_GRID", &
+                          description="Experimental CP2K-native GPW real-space-grid path for SKALA "// &
+                          "TorchScript models. This bypasses GauXC molecular quadrature and supports "// &
+                          "isolated, partially periodic, and fully periodic METHOD GPW cells with "// &
+                          "GTH/ECP pseudopotentials and METHOD GAPW/GAPW_XC cells. GAPW with "// &
+                          "GTH/ECP pseudopotentials can use KIND%GPW_TYPE regular-grid features or "// &
+                          "the GAPW one-center XC correction; GAPW all-electron uses the "// &
+                          "all-electron regular-grid density. The current implementation is limited "// &
+                          "to a single GAUXC functional and provides energy, VXC, and experimental "// &
+                          "analytical nuclear-gradient/stress evaluations. K-point runs use CP2K's "// &
+                          "standard k-point and symmetry-reduction infrastructure; the CPU "// &
+                          "TorchScript path may require preloading libtorch_cpu.so before OpenBLAS, "// &
+                          "whereas CUDA k-point runs should not preload CPU-only Torch libraries. "// &
+                          "MPI runs collect a global atom-partitioned feature block by default; "// &
+                          "NATIVE_GRID_ATOM_CHUNKS can split the Torch evaluation by atom block. "// &
+                          "PAW/one-center GAPW+GTH/ECP and METHOD GAPW_XC use CP2K's GAPW hard/soft "// &
+                          "one-center XC correction with a selectable "// &
+                          "NATIVE_GRID_GAPW_DENSITY_PARTITION. ROKS, ADMM, and non-k-point "// &
+                          "multiple-image calculations are not implemented.", &
+                          usage="NATIVE_GRID T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NATIVE_GRID_USE_CUDA", &
+                          description="Evaluate the experimental CP2K-native SKALA GPW TorchScript "// &
+                          "model on CUDA when libtorch CUDA support is available. This requires a "// &
+                          "CUDA-compatible SKALA model export; MODEL SKALA first checks "// &
+                          "GAUXC_SKALA_CUDA_MODEL in this mode and otherwise falls back to "// &
+                          "GAUXC_SKALA_MODEL. The portable default uses CPU tensors.", &
+                          usage="NATIVE_GRID_USE_CUDA T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NATIVE_GRID_CUDA_DEVICE", &
+                          description="CUDA device used by the experimental CP2K-native SKALA GPW "// &
+                          "TorchScript path when NATIVE_GRID_USE_CUDA is enabled. A negative value "// &
+                          "maps the MPI-local rank to one of the CUDA devices visible to the process; "// &
+                          "CUDA exports with device-specific TorchScript constants may require a "// &
+                          "rank-local CUDA_VISIBLE_DEVICES list. A non-negative value selects that "// &
+                          "visible CUDA device explicitly.", &
+                          usage="NATIVE_GRID_CUDA_DEVICE -1", &
+                          default_i_val=-1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NATIVE_GRID_ATOM_PARTITION", &
+                          description="Atom partition used to build the experimental CP2K-native "// &
+                          "SKALA regular-grid feature block. HARD assigns each native grid point to "// &
+                          "the nearest periodic atom and is intended for legacy energy/VXC-only runs. "// &
+                          "SMOOTH uses a Becke-like fuzzy-cell partition on the native grid and creates "// &
+                          "weighted atom rows. Analytical atom forces and stress use the differentiable "// &
+                          "SMOOTH partition internally because the corresponding partition-weight "// &
+                          "derivatives enter the SKALA feature response.", &
+                          usage="NATIVE_GRID_ATOM_PARTITION SMOOTH", &
+                          enum_c_vals=s2a("HARD", "SMOOTH"), &
+                          enum_i_vals=[1, 2], &
+                          enum_desc=s2a("Assign each grid point to the nearest atom", &
+                                        "Use a smooth Becke-like native-grid atom partition"), &
+                          default_i_val=2)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NATIVE_GRID_GAPW_DENSITY_PARTITION", &
+                          description="Hard/soft one-center density contribution used by METHOD "// &
+                          "GAPW and METHOD GAPW_XC in OneDFT/SKALA atomic-grid corrections. "// &
+                          "HARD_MINUS_SOFT evaluates the SKALA model on hard and soft atomic "// &
+                          "densities separately and adds the GAPW hard-minus-soft correction; this "// &
+                          "is the default because it follows CP2K's GAPW XC expression. For "// &
+                          "pseudopotential PAW/one-center GAPW this is distinct from KIND%GPW_TYPE, "// &
+                          "which uses the regular-grid valence-density approximation. "// &
+                          "HARD_ONLY, SOFT_ONLY, and NONE are diagnostic variants.", &
+                          usage="NATIVE_GRID_GAPW_DENSITY_PARTITION HARD_MINUS_SOFT", &
+                          enum_c_vals=s2a("HARD_MINUS_SOFT", "HARD_ONLY", "SOFT_ONLY", "NONE"), &
+                          enum_i_vals=[1, 2, 3, 4], &
+                          enum_desc=s2a("Use the hard-minus-soft GAPW one-center correction", &
+                                        "Use only the hard one-center density", &
+                                        "Use only the soft one-center density with the GAPW sign", &
+                                        "Disable the GAPW one-center SKALA correction"), &
+                          default_i_val=1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NATIVE_GRID_ATOM_CHUNKS", &
+                          description="Split the experimental CP2K-native SKALA GPW TorchScript "// &
+                          "evaluation into contiguous atom blocks. MPI runs evaluate one atom block per "// &
+                          "rank, while single-rank runs can still use atom subchunks to reduce peak CUDA "// &
+                          "memory. Dynamic feature rows and VXC gradients are routed between their "// &
+                          "local grid and atom-block owner ranks. Analytical force and stress runs use "// &
+                          "the full differentiable tensor graph instead of routed atom chunks.", &
+                          usage="NATIVE_GRID_ATOM_CHUNKS T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NATIVE_GRID_ATOM_CHUNK_ROUTING", &
+                          description="Compatibility alias for the routed experimental CP2K-native "// &
+                          "SKALA GPW atom chunks. This implies NATIVE_GRID_ATOM_CHUNKS.", &
+                          usage="NATIVE_GRID_ATOM_CHUNK_ROUTING T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NATIVE_GRID_ATOM_CHUNK_MAX_ROWS", &
+                          description="Maximum number of atom-grid rows evaluated by one TorchScript "// &
+                          "call in the experimental CP2K-native SKALA GPW atom-chunk path. A positive "// &
+                          "value splits each rank-local atom chunk into contiguous atom subchunks to "// &
+                          "reduce peak CUDA memory use; zero disables subchunking; -1 selects an "// &
+                          "automatic CUDA-oriented row cap.", &
+                          usage="NATIVE_GRID_ATOM_CHUNK_MAX_ROWS 250000", &
+                          default_i_val=-1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NATIVE_GRID_DIAGNOSTICS", &
+                          description="Print diagnostic integrals of the CP2K-native SKALA GPW feature "// &
+                          "block, including electron count, spin moment, and summed grid weights.", &
+                          usage="NATIVE_GRID_DIAGNOSTICS T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="MOLECULAR_VIRIAL", &
+                          description="Print a molecular XC virial diagnostic computed from GauXC "// &
+                          "nuclear gradients. This is not an analytical periodic stress tensor.", &
+                          usage="MOLECULAR_VIRIAL T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="MOLECULAR_VIRIAL_DEBUG", &
+                          description="Check the GauXC molecular XC virial diagnostic against a "// &
+                          "finite-difference affine scaling of the molecular coordinates.", &
+                          usage="MOLECULAR_VIRIAL_DEBUG T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="MOLECULAR_VIRIAL_DEBUG_DX", &
+                          description="Dimensionless finite-difference step for MOLECULAR_VIRIAL_DEBUG.", &
+                          usage="MOLECULAR_VIRIAL_DEBUG_DX 1.0E-4", &
+                          default_r_val=1.0E-4_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="LB_EXECUTION_SPACE", &
+                          description="Execution space for load balancer in GauXC", &
+                          usage="LB_EXECUTION_SPACE host", &
+                          enum_c_vals=s2a("HOST", "DEVICE"), &
+                          enum_i_vals=[1, 2], &
+                          enum_desc=s2a("Run on host (default)", &
+                                        "Run on device"), &
+                          default_i_val=1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="INT_EXECUTION_SPACE", &
+                          description="Execution space for integrator in GauXC", &
+                          usage="INT_EXECUTION_SPACE host", &
+                          enum_c_vals=s2a("HOST", "DEVICE"), &
+                          enum_i_vals=[1, 2], &
+                          enum_desc=s2a("Run on host (default)", &
+                                        "Run on device"), &
+                          default_i_val=1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="LWD_KERNEL", &
+                          description="Local work driver kernel used by the GauXC integrator. "// &
+                          "DEFAULT uses GauXC's default for the selected execution space. "// &
+                          "Device builds with CUTLASS support can use SCHEME1-CUTLASS to run "// &
+                          "the grouped local potential update through CUTLASS.", &
+                          usage="LWD_KERNEL DEFAULT", &
+                          default_c_val="DEFAULT")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="SKALA_RUNTIME", &
+                          description="MPI communicator policy for GauXC OneDFT/SKALA. AUTO uses "// &
+                          "the force-evaluation communicator for closed-shell calculations and a "// &
+                          "rank-local replicated runtime for open-shell calculations. MPI forces the "// &
+                          "force-evaluation communicator. SELF forces the previous replicated mode.", &
+                          usage="SKALA_RUNTIME AUTO", &
+                          enum_c_vals=s2a("AUTO", "MPI", "SELF"), &
+                          enum_i_vals=[1, 2, 3], &
+                          enum_desc=s2a("Closed-shell MPI, open-shell replicated (default)", &
+                                        "Use the force-evaluation MPI communicator", &
+                                        "Use rank-local replicated GauXC runtimes"), &
+                          default_i_val=1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="ONEDFT_GRADIENT_RUNTIME", &
+                          description="MPI communicator policy for GauXC OneDFT/SKALA nuclear gradients. "// &
+                          "AUTO keeps the conservative rank-local gradient runtime when energy/VXC uses "// &
+                          "the MPI communicator. MPI uses the force-evaluation communicator for gradients "// &
+                          "and requires GauXC support for distributed OneDFT/SKALA gradients. SELF forces "// &
+                          "rank-local replicated gradient runtimes.", &
+                          usage="ONEDFT_GRADIENT_RUNTIME AUTO", &
+                          enum_c_vals=s2a("AUTO", "MPI", "SELF"), &
+                          enum_i_vals=[1, 2, 3], &
+                          enum_desc=s2a("Conservative replicated gradient runtime (default)", &
+                                        "Use the force-evaluation MPI communicator when supported", &
+                                        "Use rank-local replicated gradient runtimes"), &
+                          default_i_val=1)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="OUTPUT_PATH", &
+                          description="Optional path to an existing directory for GauXC HDF5 debug output. "// &
+                          "If set, molecule and basis set data are written as separate HDF5 files.", &
+                          usage="OUTPUT_PATH /path/to/output", &
+                          default_c_val="")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+   END SUBROUTINE create_gauxc_section
+
+! **************************************************************************************************
 !> \brief creates the input section for the xc part
 !> \param section the section to create
 !> \author fawzi
@@ -1328,7 +1682,7 @@ CONTAINS
 
       CALL section_create(subsection, __LOCATION__, name="xc_grid", & !FM to do
                           description="The xc parameters used when calculating the xc on the grid", &
-                          n_keywords=5, n_subsections=0, repeats=.FALSE.)
+                          n_keywords=6, n_subsections=0, repeats=.FALSE.)
       CALL keyword_create(keyword, __LOCATION__, name="xc_smooth_rho", &
                           description="The density smoothing used for the xc calculation", &
                           usage="xc_smooth_rho nn10", default_i_val=xc_rho_no_smooth, &
@@ -1355,6 +1709,16 @@ CONTAINS
                           description="Uses a finer grid only to calculate the xc", &
                           usage="use_finer_grid", default_l_val=.FALSE., &
                           lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="fine_grid_factor", &
+                          description="Factor by which the XC grid cutoff is increased when USE_FINER_GRID is active. "// &
+                          "This setting has no effect unless USE_FINER_GRID is enabled. The default of 4.0 preserves "// &
+                          "the historical finer XC grid. Smaller factors can reduce the finer-grid cost, but should "// &
+                          "be checked together with the regular MGRID cutoff convergence.", &
+                          usage="FINE_GRID_FACTOR 4.0", default_r_val=4.0_dp, &
+                          variants=["FINE_XC_FACTOR"])
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
 

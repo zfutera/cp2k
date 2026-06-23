@@ -145,12 +145,13 @@ MODULE input_cp2k_print_dft
                                   section_release, &
                                   section_type
    USE input_val_types, ONLY: char_t, &
+                              enum_t, &
                               integer_t, &
                               lchar_t, &
                               logical_t, &
                               real_t
    USE kinds, ONLY: dp
-   USE kpoint_mo_dump, ONLY: mokp_overlap_gto, mokp_overlap_matrix
+   USE kpoint_mo_dump, ONLY: mokp_ao_gto_basis, mokp_ao_overlap_matrix
    USE pw_grids, ONLY: do_pw_grid_blocked_false, &
                        do_pw_grid_blocked_free, &
                        do_pw_grid_blocked_true
@@ -163,8 +164,7 @@ MODULE input_cp2k_print_dft
    USE qs_density_mixing_types, ONLY: create_mixing_section
    USE qs_fb_input, ONLY: create_filtermatrix_section
    USE qs_mom_types, ONLY: create_mom_section
-   USE string_utilities, ONLY: newline, &
-                               s2a
+   USE string_utilities, ONLY: s2a
 
    USE cp_output_handling_openpmd, ONLY: cp_openpmd_get_default_extension
 
@@ -175,7 +175,7 @@ MODULE input_cp2k_print_dft
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'input_cp2k_print_dft'
 
-   PUBLIC :: create_print_dft_section, create_pdos_section
+   PUBLIC :: add_dos_keywords, create_print_dft_section
 
 CONTAINS
 
@@ -439,6 +439,7 @@ CONTAINS
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
+
       CALL keyword_create(keyword, __LOCATION__, name="NDIGITS", &
                           description="Specify the number of digits used to print the AO matrices", &
                           default_i_val=6)
@@ -482,6 +483,7 @@ CONTAINS
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
+
       CALL keyword_create(keyword, __LOCATION__, name="COMMUTATOR_HR", &
                           description="Controls the printing of the [H,r] commutator matrix", &
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
@@ -553,6 +555,11 @@ CONTAINS
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="CARTESIAN_OVERLAP", &
+                          description="Print the Cartesian overlap matrix in line with Cartesian MO coefficients.", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
       CALL keyword_create(keyword, __LOCATION__, name="ENERGIES", &
                           variants=s2a("EIGENVALUES", "EIGVALS"), &
                           description="Print the MO energies (eigenvalues).", &
@@ -620,9 +627,16 @@ CONTAINS
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
-      CALL keyword_create(keyword, __LOCATION__, name="WRITE_NVAL", &
-                          description="Controls whether the [Nval] block is written to the MOLDEN file.", &
-                          usage="WRITE_NVAL T", &
+      CALL keyword_create(keyword, __LOCATION__, name="WRITE_PSEUDO", &
+                          description="Controls whether the [Pseudo] block is written to the MOLDEN file.", &
+                          usage="WRITE_PSEUDO T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="MARK_GHOST", &
+                          description="Controls whether ghost atoms are marked in the [Atoms] block by "// &
+                          "setting their atomic number to zero.", &
+                          usage="MARK_GHOST T", &
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
@@ -642,14 +656,13 @@ CONTAINS
                           enum_i_vals=[gto_cartesian, gto_spherical])
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
-      CALL keyword_create(keyword, __LOCATION__, name="OT_NLUMO", &
+      CALL keyword_create(keyword, __LOCATION__, name="NLUMO", &
                           description="Number of unoccupied orbitals to include in the Molden file. "// &
-                          "Triggers a post-SCF eigensolver to obtain virtual orbital energies and "// &
-                          "coefficients. Only available with OT method, since diagonalization "// &
-                          "can already compute unoccupied orbitals via `ADDED_MOS` during "// &
-                          "SCF and output them to the Molden file after convergence. "// &
-                          "0 means no virtual orbitals, -1 means all available.", &
-                          usage="OT_NLUMO {int}", &
+                          "For OT calculations, the requested virtual orbitals are generated after "// &
+                          "SCF using the OT eigensolver. For diagonalization calculations, "// &
+                          "SCF%ADDED_MOS is increased if needed to make the requested unoccupied "// &
+                          "orbitals available. 0 means no virtual orbitals, -1 means all available.", &
+                          usage="NLUMO integer", &
                           default_i_val=0)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
@@ -661,10 +674,10 @@ CONTAINS
                                        "The information of cell and k-points is given at first. Then, "// &
                                        "the coefficients of molecular orbitals are always written, "// &
                                        "while users can choose whether to write GTO basis information "// &
-                                       "or directly overlap matrices though `OVERLAP_EXPORT_TYPE` keyword.", &
+                                       "or explicit overlap matrices through the `AO_EXPORT_TYPE` keyword.", &
                                        print_level=debug_print_level + 1, add_last=add_last_numeric, filename="")
       CALL keyword_create(keyword, __LOCATION__, name="UNIT", &
-                          description="Unit for coordinates and cell in the MOLDEN file.", &
+                          description="Unit for coordinates and cell in the .mokp file.", &
                           usage="UNIT ANGSTROM", &
                           enum_c_vals=s2a("BOHR", "ANGSTROM"), &
                           enum_desc=s2a("Write in Bohr (AU)", "Write in Angstrom"), &
@@ -678,15 +691,15 @@ CONTAINS
                           default_i_val=9)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
-      CALL keyword_create(keyword, __LOCATION__, name="OVERLAP_EXPORT_TYPE", &
-                          description="How detailed information is provided. "// &
-                          "GTO writes basis set exponents/coefficients (compact, post-processing reconstructs S(k)). "// &
-                          "MATRIX writes S(k) directly (larger file, ready to use).", &
-                          default_i_val=mokp_overlap_gto, &
-                          enum_c_vals=s2a("GTO", "MATRIX"), &
+      CALL keyword_create(keyword, __LOCATION__, name="AO_EXPORT_TYPE", &
+                          description="How AO information is provided for interpreting MO coefficients. "// &
+                          "GTO_BASIS writes basis set exponents/coefficients (compact, post-processing reconstructs S(k)). "// &
+                          "OVERLAP_MATRIX writes S(k) directly (larger file, ready to use).", &
+                          default_i_val=mokp_ao_gto_basis, &
+                          enum_c_vals=s2a("GTO_BASIS", "OVERLAP_MATRIX"), &
                           enum_desc=s2a("Write GTO basis set definition (MOLDEN denormalization convention)", &
                                         "Write explicit overlap matrices S(k) for all k-points"), &
-                          enum_i_vals=[mokp_overlap_gto, mokp_overlap_matrix])
+                          enum_i_vals=[mokp_ao_gto_basis, mokp_ao_overlap_matrix])
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
       CALL section_add_subsection(section, print_key)
@@ -722,7 +735,7 @@ CONTAINS
 
       CALL section_create(subsection, __LOCATION__, name="TREXIO", &
                           description="Write a TREXIO file to disk.", &
-                          n_keywords=1, n_subsections=0, repeats=.FALSE.)
+                          n_keywords=4, n_subsections=0, repeats=.FALSE.)
       CALL keyword_create(keyword, __LOCATION__, name="FILENAME", &
                           description="Body of Filename for the trexio file.", &
                           usage="FILENAME {name}", default_c_val="TREXIO", &
@@ -732,6 +745,59 @@ CONTAINS
       CALL keyword_create(keyword, __LOCATION__, name="CARTESIAN", &
                           description="Store the MOs in the Cartesian basis instead of the default spherical basis.", &
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="FULL_KPOINT_GRID", &
+                          description="For symmetry-reduced k-point SCF calculations, export MOs on the "// &
+                          "full unreduced k-point grid instead of the irreducible grid.", &
+                          usage="FULL_KPOINT_GRID <LOGICAL>", default_l_val=.FALSE., &
+                          lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="REUSE_SCF_MOS", &
+                          description="When FULL_KPOINT_GRID is active, try to reconstruct the full-grid "// &
+                          "MO coefficients from the symmetry-reduced SCF orbitals before falling back to "// &
+                          "a full-grid diagonalization.", &
+                          usage="REUSE_SCF_MOS T", default_l_val=.TRUE.)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
+      CALL section_create(subsection, __LOCATION__, name="CASINO", &
+                          description="Write a CASINO gwfn.data file to disk.", &
+                          n_keywords=5, n_subsections=0, repeats=.FALSE.)
+      CALL keyword_create(keyword, __LOCATION__, name="FILENAME", &
+                          description="Filename for the CASINO gwfn.data file.", &
+                          usage="FILENAME {name}", default_c_val="gwfn.data", &
+                          type_of_var=char_t)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="EPS_KPOINT_REAL", &
+                          description="Tolerance for detecting Gamma/BZ-edge k-points with real orbitals.", &
+                          usage="EPS_KPOINT_REAL 1.0E-10", default_r_val=1.0E-10_dp)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="FULL_KPOINT_GRID", &
+                          description="For symmetry-reduced k-point SCF calculations, export orbitals on the "// &
+                          "full unreduced k-point grid required by CASINO.", &
+                          usage="FULL_KPOINT_GRID <LOGICAL>", default_l_val=.TRUE., &
+                          lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="REUSE_SCF_MOS", &
+                          description="When FULL_KPOINT_GRID is active, try to reconstruct the full-grid "// &
+                          "MO coefficients from the symmetry-reduced SCF orbitals before falling back to "// &
+                          "a full-grid diagonalization.", &
+                          usage="REUSE_SCF_MOS T", default_l_val=.TRUE.)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="WRITE_PSEUDOPOTENTIALS", &
+                          description="Write CASINO *_pp.data files for CP2K semilocal ECP potentials. "// &
+                          "GTH pseudopotentials are marked in gwfn.data, but require externally supplied "// &
+                          "CASINO pseudopotential files.", &
+                          usage="WRITE_PSEUDOPOTENTIALS T", default_l_val=.TRUE., &
+                          lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
       CALL section_add_subsection(section, subsection)
@@ -1062,7 +1128,10 @@ CONTAINS
       CALL cp_print_key_section_create(print_key, __LOCATION__, "LOCAL_ENERGY_CUBE", &
                                        description="Controls the printing of cube files with the local"// &
                                        " energy. It is valid only for QS with GPW/GAPW formalism."// &
-                                       " Meta and hybrid functionals are not possible.", &
+                                       " Meta and hybrid functionals are not possible. For GAPW/GAPW_XC"// &
+                                       " and ADMM-GAPW this regular-grid cube keeps the existing soft-grid"// &
+                                       " semantics; atom-centered hard one-center terms are not projected"// &
+                                       " onto the cube grid.", &
                                        print_level=debug_print_level, filename="")
       CALL keyword_create(keyword, __LOCATION__, name="stride", &
                           description="The stride (X,Y,Z) used to write the cube file "// &
@@ -1088,7 +1157,10 @@ CONTAINS
       CALL cp_print_key_section_create(print_key, __LOCATION__, "LOCAL_STRESS_CUBE", &
                                        description="Controls the printing of cube files with the local"// &
                                        " stress. It is valid only for QS with GPW/GAPW formalism."// &
-                                       " Meta and hybrid functionals are not possible.", &
+                                       " Meta and hybrid functionals are not possible. For GAPW/GAPW_XC"// &
+                                       " and ADMM-GAPW this regular-grid cube keeps the existing soft-grid"// &
+                                       " semantics; atom-centered hard one-center terms are not projected"// &
+                                       " onto the cube grid.", &
                                        print_level=debug_print_level, filename="")
       CALL keyword_create(keyword, __LOCATION__, name="stride", &
                           description="The stride (X,Y,Z) used to write the cube file "// &
@@ -1111,11 +1183,21 @@ CONTAINS
       CALL section_add_subsection(section, print_key)
       CALL section_release(print_key)
 
-      CALL create_dos_section(print_key)
-      CALL section_add_subsection(section, print_key)
-      CALL section_release(print_key)
+      CALL cp_print_key_section_create(print_key, __LOCATION__, "DOS", &
+                                       description="Print density of states (DOS). "// &
+                                       "Projected DOS output can be enabled with PDOS.", &
+                                       print_level=debug_print_level, common_iter_levels=1, filename="")
 
-      CALL create_pdos_section(print_key)
+      CALL add_dos_keywords(print_key, xas_mode=.FALSE.)
+
+      CALL keyword_create(keyword, __LOCATION__, name="MP_GRID", &
+                          description="Specify a Monkhorst-Pack grid with which to compute the density of states. "// &
+                          "Works only for a k-point calculation", &
+                          usage="MP_GRID {integer} {integer} {integer}", default_i_vals=[-1], &
+                          n_var=3, type_of_var=integer_t)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
       CALL section_add_subsection(section, print_key)
       CALL section_release(print_key)
 
@@ -1220,6 +1302,15 @@ CONTAINS
       CALL create_kpoints_section(subsection)
       CALL section_add_subsection(print_key, subsection)
       CALL section_release(subsection)
+      CALL keyword_create(keyword, __LOCATION__, name="KG", &
+                          description="Print the electronic moments separately for KG subsystems", &
+                          usage="KG .TRUE.", &
+                          repeats=.FALSE., &
+                          n_var=1, &
+                          default_l_val=.FALSE., &
+                          lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
       CALL section_add_subsection(section, print_key)
       CALL section_release(print_key)
 
@@ -1480,9 +1571,16 @@ CONTAINS
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(sub_print_key, keyword)
       CALL keyword_release(keyword)
-      CALL keyword_create(keyword, __LOCATION__, name="WRITE_NVAL", &
-                          description="Controls whether the [Nval] block is written to the MOLDEN file.", &
-                          usage="WRITE_NVAL T", &
+      CALL keyword_create(keyword, __LOCATION__, name="WRITE_PSEUDO", &
+                          description="Controls whether the [Pseudo] block is written to the MOLDEN file.", &
+                          usage="WRITE_PSEUDO T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(sub_print_key, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="MARK_GHOST", &
+                          description="Controls whether ghost atoms are marked in the [Atoms] block by "// &
+                          "setting their atomic number to zero.", &
+                          usage="MARK_GHOST T", &
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(sub_print_key, keyword)
       CALL keyword_release(keyword)
@@ -1587,9 +1685,16 @@ CONTAINS
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(sub_print_key, keyword)
       CALL keyword_release(keyword)
-      CALL keyword_create(keyword, __LOCATION__, name="WRITE_NVAL", &
-                          description="Controls whether the [Nval] block is written to the MOLDEN file.", &
-                          usage="WRITE_NVAL T", &
+      CALL keyword_create(keyword, __LOCATION__, name="WRITE_PSEUDO", &
+                          description="Controls whether the [Pseudo] block is written to the MOLDEN file.", &
+                          usage="WRITE_PSEUDO T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(sub_print_key, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="MARK_GHOST", &
+                          description="Controls whether ghost atoms are marked in the [Atoms] block by "// &
+                          "setting their atomic number to zero.", &
+                          usage="MARK_GHOST T", &
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(sub_print_key, keyword)
       CALL keyword_release(keyword)
@@ -1732,9 +1837,16 @@ CONTAINS
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
-      CALL keyword_create(keyword, __LOCATION__, name="WRITE_NVAL", &
-                          description="Controls whether the [Nval] block is written to the MOLDEN file.", &
-                          usage="WRITE_NVAL T", &
+      CALL keyword_create(keyword, __LOCATION__, name="WRITE_PSEUDO", &
+                          description="Controls whether the [Pseudo] block is written to the MOLDEN file.", &
+                          usage="WRITE_PSEUDO T", &
+                          default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+      CALL keyword_create(keyword, __LOCATION__, name="MARK_GHOST", &
+                          description="Controls whether ghost atoms are marked in the [Atoms] block by "// &
+                          "setting their atomic number to zero.", &
+                          usage="MARK_GHOST T", &
                           default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
@@ -1781,8 +1893,21 @@ CONTAINS
                           n_var=-1, type_of_var=integer_t, repeats=.TRUE.)
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
+
       CALL section_add_subsection(sub_print_key, subsection)
       CALL section_release(subsection)
+      CALL section_add_subsection(print_key, sub_print_key)
+      CALL section_release(sub_print_key)
+
+      NULLIFY (sub_print_key)
+      CALL cp_print_key_section_create(sub_print_key, __LOCATION__, name="IAO_OVERLAP", &
+                                       description="Controls the printout required for ROSE.", &
+                                       print_level=debug_print_level, filename="CP2K_ROSE")
+      CALL keyword_create(keyword, __LOCATION__, name="NDIGITS", &
+                          description="Specify the number of digits used to print the MO information.", &
+                          default_i_val=6)
+      CALL section_add_keyword(sub_print_key, keyword)
+      CALL keyword_release(keyword)
       CALL section_add_subsection(print_key, sub_print_key)
       CALL section_release(sub_print_key)
 
@@ -2551,58 +2676,14 @@ CONTAINS
    END SUBROUTINE create_elf_print_section
 
 ! **************************************************************************************************
-!> \brief ...
-!> \param print_key ...
+!> \brief Add projected-DOS related keywords to a DOS or XAS PDOS print section.
+!> \param print_key print key section to add keywords to
+!> \param xas_mode if true, add keywords for the XAS-specific standalone PDOS section
 ! **************************************************************************************************
-   SUBROUTINE create_dos_section(print_key)
+   SUBROUTINE add_dos_keywords(print_key, xas_mode)
 
       TYPE(section_type), POINTER                        :: print_key
-
-      TYPE(keyword_type), POINTER                        :: keyword
-
-      NULLIFY (keyword)
-
-      CALL cp_print_key_section_create(print_key, __LOCATION__, "DOS", &
-                                       description="Print Density of States (DOS) (only available states from SCF)", &
-                                       print_level=debug_print_level, common_iter_levels=1, filename="")
-
-      CALL keyword_create(keyword, __LOCATION__, name="APPEND", &
-                          description="Append the DOS obtained at different iterations to the output file. "// &
-                          "By default the file is overwritten", &
-                          usage="APPEND", default_l_val=.FALSE., &
-                          lone_keyword_l_val=.TRUE.)
-      CALL section_add_keyword(print_key, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, __LOCATION__, name="DELTA_E", &
-                          description="Histogramm energy spacing.", &
-                          usage="DELTA_E 0.0005", type_of_var=real_t, default_r_val=0.001_dp)
-      CALL section_add_keyword(print_key, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, __LOCATION__, name="NDIGITS", &
-                          description="Specify the number of digits used to print density and occupation", &
-                          default_i_val=4)
-      CALL section_add_keyword(print_key, keyword)
-      CALL keyword_release(keyword)
-
-      CALL keyword_create(keyword, __LOCATION__, name="MP_GRID", &
-                          description="Specify a Monkhorst-Pack grid with which to compute the density of states. "// &
-                          "Works only for a k-point calculation", &
-                          usage="MP_GRID {integer} {integer} {integer}", default_i_vals=[-1], &
-                          n_var=3, type_of_var=integer_t)
-      CALL section_add_keyword(print_key, keyword)
-      CALL keyword_release(keyword)
-
-   END SUBROUTINE create_dos_section
-
-! **************************************************************************************************
-!> \brief ...
-!> \param print_key ...
-! **************************************************************************************************
-   SUBROUTINE create_pdos_section(print_key)
-
-      TYPE(section_type), POINTER                        :: print_key
+      LOGICAL, INTENT(IN)                                :: xas_mode
 
       TYPE(keyword_type), POINTER                        :: keyword
       TYPE(section_type), POINTER                        :: subsection
@@ -2610,31 +2691,111 @@ CONTAINS
       NULLIFY (subsection)
       NULLIFY (keyword)
 
-      CALL cp_print_key_section_create(print_key, __LOCATION__, "PDOS", &
-                                       description="Print out the DOS projected per kind and angular momentum  ", &
-                                       print_level=debug_print_level, common_iter_levels=1, filename="")
-      CALL keyword_create(keyword, __LOCATION__, name="COMPONENTS", &
-                          description="Print out PDOS distinguishing all angular momentum components.", &
-                          usage="COMPONENTS", default_l_val=.FALSE., &
-                          lone_keyword_l_val=.TRUE.)
-      CALL section_add_keyword(print_key, keyword)
-      CALL keyword_release(keyword)
       CALL keyword_create(keyword, __LOCATION__, name="APPEND", &
-                          description="Append the PDOS obtained at different iterations to the PDOS output file. "// &
+                          description="Append the DOS/PDOS obtained at different iterations to the output file. "// &
                           "By default the file is overwritten", &
-                          usage="APPEND", default_l_val=.FALSE., &
-                          lone_keyword_l_val=.TRUE.)
+                          usage="APPEND", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
-      CALL keyword_create( &
-         keyword, __LOCATION__, name="NLUMO", &
-         description="Number of virtual orbitals to be added to the MO set (-1=all)."//newline// &
-         "CAUTION: Setting this value to be higher than the "// &
-         "number of states present may cause a Cholesky error."//newline// &
-         "This keyword only applies to MO sets, not to XAS_TDP states.", &
-         usage="NLUMO integer", default_i_val=0)
+
+      CALL keyword_create(keyword, __LOCATION__, name="DELTA_E", &
+                          description="Energy spacing of the broadened DOS/PDOS output grid.", &
+                          usage="DELTA_E 0.0005", type_of_var=real_t, default_r_val=0.001_dp)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="ENERGY_UNIT", &
+                          description="Energy unit used for the printed DOS/PDOS energy axis. "// &
+                          "For broadened spectra, intensities are converted consistently to the selected energy unit.", &
+                          usage="ENERGY_UNIT HARTREE", type_of_var=enum_t, &
+                          enum_c_vals=s2a("HARTREE", "EV"), &
+                          enum_i_vals=[1, 2], &
+                          enum_desc=s2a("Print energies in Hartree (a.u.).", &
+                                        "Print energies in electronvolt."), &
+                          default_i_val=1)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="ENERGY_ZERO", &
+                          description="Reference energy used for the printed DOS/PDOS energy axis. "// &
+                          "With AUTO, the Fermi energy is used if smearing is enabled or fractional "// &
+                          "occupations are found; otherwise the highest occupied crystal orbital is used.", &
+                          usage="ENERGY_ZERO AUTO", type_of_var=enum_t, &
+                          enum_c_vals=s2a("AUTO", "ABSOLUTE", "FERMI", "HOCO"), &
+                          enum_i_vals=[1, 2, 3, 4], &
+                          enum_desc=s2a("Choose FERMI for smeared or fractionally occupied systems, otherwise HOCO.", &
+                                        "Print absolute orbital energies.", &
+                                        "Shift orbital energies by the Fermi energy.", &
+                                        "Shift orbital energies by the highest occupied crystal orbital."), &
+                          default_i_val=1)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="BROADEN_TYPE", &
+                          description="Type of broadening function used to produce the DOS/PDOS curve.", &
+                          usage="BROADEN_TYPE GAUSSIAN", type_of_var=enum_t, &
+                          enum_c_vals=s2a("GAUSSIAN", "LORENTZIAN", "PSEUDO_VOIGT"), &
+                          enum_i_vals=[1, 2, 3], &
+                          enum_desc=s2a("Use a Gaussian broadening function.", &
+                                        "Use a Lorentzian broadening function.", &
+                                        "Use a pseudo-Voigt mixture of Lorentzian and Gaussian functions."), &
+                          default_i_val=1)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="BROADEN_WIDTH", &
+                          description="Full width at half maximum (FWHM) of the DOS/PDOS broadening function.", &
+                          usage="BROADEN_WIDTH [eV] 0.1", type_of_var=real_t, &
+                          default_r_val=cp_unit_to_cp2k(value=0.1_dp, unit_str="eV"), unit_str="eV")
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="VOIGT_MIXING", &
+                          description="Lorentzian fraction of the pseudo-Voigt broadening function.", &
+                          usage="VOIGT_MIXING 0.5", type_of_var=real_t, default_r_val=0.5_dp)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NDIGITS", &
+                          description="Specify the number of digits used to print DOS/PDOS values.", &
+                          default_i_val=6)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="NLUMO", &
+                          description="Number of unoccupied orbitals to include in the DOS/PDOS (-1=all). "// &
+                          "For OT calculations, the requested virtual orbitals are generated after SCF using the "// &
+                          "OT eigensolver. For diagonalization calculations, SCF%ADDED_MOS is increased if needed "// &
+                          "to make the requested unoccupied orbitals available.", &
+                          usage="NLUMO integer", default_i_val=0)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      IF (.NOT. xas_mode) THEN
+         CALL section_create(subsection, __LOCATION__, name="PDOS", &
+                             description="Controls the printing of kind-resolved projected DOS.", &
+                             n_keywords=2, n_subsections=0)
+         CALL keyword_create(keyword, __LOCATION__, name="COMPONENTS", &
+                             description="Print out PDOS distinguishing all angular momentum components.", &
+                             usage="COMPONENTS", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+         CALL section_add_keyword(subsection, keyword)
+         CALL keyword_release(keyword)
+
+         CALL keyword_create(keyword, __LOCATION__, name="RAW", &
+                             description="Print MO-resolved projected DOS weights to *.pdos_raw.", &
+                             usage="RAW", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+         CALL section_add_keyword(subsection, keyword)
+         CALL keyword_release(keyword)
+         CALL section_add_subsection(print_key, subsection)
+         CALL section_release(subsection)
+      ELSE
+         CALL keyword_create(keyword, __LOCATION__, name="COMPONENTS", &
+                             description="Print out PDOS distinguishing all angular momentum components.", &
+                             usage="COMPONENTS", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+         CALL section_add_keyword(print_key, keyword)
+         CALL keyword_release(keyword)
+      END IF
+
       CALL keyword_create(keyword, __LOCATION__, name="OUT_EACH_STATE", &
                           variants=["OUT_EACH_MO"], &
                           description="Output on the status of the calculation every OUT_EACH_MO states. If -1 no output", &
@@ -2648,33 +2809,28 @@ CONTAINS
                           n_keywords=4, n_subsections=0, repeats=.TRUE.)
       CALL keyword_create(keyword, __LOCATION__, name="COMPONENTS", &
                           description="Print out PDOS distinguishing all angular momentum components.", &
-                          usage="COMPONENTS", default_l_val=.FALSE., &
-                          lone_keyword_l_val=.TRUE.)
+                          usage="COMPONENTS", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
-
       CALL keyword_create(keyword, __LOCATION__, name="LIST", &
-                          description="Specifies a list of indexes of atoms where to project the DOS  ", &
-                          usage="LIST {integer}  {integer} ..  {integer} ", type_of_var=integer_t, &
+                          description="Specifies a list of indexes of atoms where to project the DOS", &
+                          usage="LIST {integer} {integer} .. {integer}", type_of_var=integer_t, &
                           n_var=-1, repeats=.TRUE.)
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
-
       CALL section_add_subsection(print_key, subsection)
       CALL section_release(subsection)
 
       CALL section_create(subsection, __LOCATION__, name="R_LDOS", &
-                          description="Controls the printing of local PDOS, projected on 3D volume in real space,"// &
-                          " the volume is defined in terms of position with respect to atoms in the lists", &
+                          description="Controls the printing of local PDOS, projected on 3D volume in real space, "// &
+                          "the volume is defined in terms of position with respect to atoms in the lists", &
                           n_keywords=4, n_subsections=0, repeats=.TRUE.)
-
       CALL keyword_create(keyword, __LOCATION__, name="LIST", &
-                          description="Specifies a list of indexes of atoms used to define the real space volume  ", &
-                          usage="LIST {integer}  {integer} ..  {integer} ", type_of_var=integer_t, &
+                          description="Specifies a list of indexes of atoms used to define the real space volume", &
+                          usage="LIST {integer} {integer} .. {integer}", type_of_var=integer_t, &
                           n_var=-1, repeats=.TRUE.)
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
-
       CALL keyword_create(keyword, __LOCATION__, name="XRANGE", &
                           description="range of positions in Cartesian direction x: all grid points within "// &
                           "this range from at least one atom of the list are considered", &
@@ -2693,22 +2849,20 @@ CONTAINS
                           usage="ZRANGE -10.0 10.0", unit_str="angstrom", n_var=2, type_of_var=real_t)
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
-
       CALL keyword_create(keyword, __LOCATION__, name="ERANGE", &
                           description="Only project states with the energy values in the given interval. "// &
                           "Default is all states.", &
                           usage="ERANGE -1.0 1.0", unit_str="hartree", n_var=2, type_of_var=real_t)
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
-
       CALL section_add_subsection(print_key, subsection)
       CALL section_release(subsection)
 
-   END SUBROUTINE create_pdos_section
+   END SUBROUTINE add_dos_keywords
 
 ! **************************************************************************************************
-!> \brief ...
-!> \param print_key ...
+!> \brief Create WANNIER90 print section.
+!> \param print_key print key section to create
 ! **************************************************************************************************
    SUBROUTINE create_wannier_section(print_key)
 
@@ -2732,6 +2886,52 @@ CONTAINS
       CALL keyword_create(keyword, __LOCATION__, name="MP_GRID", &
                           description="The dimensions of the Monkhorst-Pack k-point grid. ", &
                           usage="MP_GRID 6 6 6", n_var=-1, default_i_vals=[10, 10, 10], type_of_var=integer_t)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="KPOINTS_SOURCE", &
+                          description="Select the k-point source for the Wannier90 export. MP_GRID keeps "// &
+                          "the historical behavior and builds a full grid from WANNIER90%MP_GRID. SCF uses "// &
+                          "the full k-point mesh from DFT%KPOINTS for Monkhorst-Pack, MacDonald, Gamma, or "// &
+                          "explicit GENERAL k-points. If the SCF calculation uses K290 or SPGLIB symmetry "// &
+                          "reduction, the corresponding unreduced mesh is used for Wannier90 because "// &
+                          "Wannier90 requires a complete mesh.", &
+                          usage="KPOINTS_SOURCE MP_GRID", type_of_var=enum_t, &
+                          enum_c_vals=s2a("MP_GRID", "SCF"), &
+                          enum_i_vals=[0, 1], &
+                          enum_desc=s2a("Build the Wannier90 k-point mesh from WANNIER90%MP_GRID.", &
+                                        "Use the full k-point mesh from DFT%KPOINTS."), &
+                          default_i_val=0)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="REUSE_SCF_MOS", &
+                          description="Try to reuse the SCF k-point MO coefficients when KPOINTS_SOURCE SCF "// &
+                          "is active. CP2K can directly reuse full SCF meshes, time-reversal partners, "// &
+                          "non-degenerate atom/AO symmetry images, and atom/AO symmetry images whose "// &
+                          "degenerate band subspaces are fully contained in the exported Wannier90 band "// &
+                          "window. If the Wannier90 band window cuts through a degenerate subspace, CP2K "// &
+                          "falls back to the historical full-mesh diagonalization.", &
+                          usage="REUSE_SCF_MOS T", default_l_val=.TRUE.)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="VALIDATE_REUSE_SCF_MOS", &
+                          description="When KPOINTS_SOURCE SCF and REUSE_SCF_MOS are active, first build a "// &
+                          "full-mesh diagonalization reference and validate the reconstructed SCF MO "// &
+                          "subspaces against it before writing Wannier90 files. This diagnostic option is "// &
+                          "expensive and intended for development of symmetry-reconstructed Wannier90 "// &
+                          "exports.", &
+                          usage="VALIDATE_REUSE_SCF_MOS T", default_l_val=.FALSE.)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="USE_BLOCH_PHASES", &
+                          description="Apply the CP2K Bloch-phase gauge to complete exported band subspaces "// &
+                          "and write an explicit identity .amn projection file for Wannier90. It is only "// &
+                          "valid when WANNIER_FUNCTIONS matches the number of exported bands; disentangled "// &
+                          "Wannier90 calculations still need explicit projections.", &
+                          usage="USE_BLOCH_PHASES T", default_l_val=.FALSE.)
       CALL section_add_keyword(print_key, keyword)
       CALL keyword_release(keyword)
 

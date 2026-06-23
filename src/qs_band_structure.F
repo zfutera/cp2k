@@ -116,6 +116,7 @@ CONTAINS
       LOGICAL                                            :: explicit, io_default, my_kpgrp
       REAL(KIND=dp)                                      :: t1, t2
       REAL(KIND=dp), DIMENSION(3)                        :: kpptr
+      REAL(KIND=dp), DIMENSION(3, 3)                     :: cart_hmat
       REAL(KIND=dp), DIMENSION(:), POINTER               :: eigenvalues, eigval, occnum, &
                                                             occupation_numbers, wkp
       REAL(kind=dp), DIMENSION(:, :), POINTER            :: kpgeneral, kspecial, xkp
@@ -134,6 +135,8 @@ CONTAINS
          unit_nr = cp_logger_get_default_io_unit()
          CALL get_qs_env(qs_env=qs_env, para_env=para_env)
          CALL get_qs_env(qs_env, cell=cell)
+         cart_hmat(:, :) = cell%hmat(:, :)
+         IF (cell%input_cell_canonicalized) cart_hmat(:, :) = cell%input_hmat(:, :)
          kpset => section_vals_get_subs_vals(bs_input, "KPOINT_SET")
          CALL section_vals_get(kpset, n_repetition=n_rep)
          IF (unit_nr > 0) THEN
@@ -185,13 +188,13 @@ CONTAINS
                CASE ("B_VECTOR")
                   kspecial(1:3, ip) = kpptr(1:3)
                CASE ("CART_ANGSTROM")
-                  kspecial(1:3, ip) = (kpptr(1)*cell%hmat(1, 1:3) + &
-                                       kpptr(2)*cell%hmat(2, 1:3) + &
-                                       kpptr(3)*cell%hmat(3, 1:3))/twopi*angstrom
+                  kspecial(1:3, ip) = (kpptr(1)*cart_hmat(1, 1:3) + &
+                                       kpptr(2)*cart_hmat(2, 1:3) + &
+                                       kpptr(3)*cart_hmat(3, 1:3))/twopi*angstrom
                CASE ("CART_BOHR")
-                  kspecial(1:3, ip) = (kpptr(1)*cell%hmat(1, 1:3) + &
-                                       kpptr(2)*cell%hmat(2, 1:3) + &
-                                       kpptr(3)*cell%hmat(3, 1:3))/twopi
+                  kspecial(1:3, ip) = (kpptr(1)*cart_hmat(1, 1:3) + &
+                                       kpptr(2)*cart_hmat(2, 1:3) + &
+                                       kpptr(3)*cart_hmat(3, 1:3))/twopi
                CASE DEFAULT
                   CPABORT("Unknown unit <"//TRIM(ustr)//"> specified for k-point definition")
                END SELECT
@@ -297,9 +300,12 @@ CONTAINS
 !> \param mp_grid ...
 !> \param kpgeneral ...
 !> \param group_size_ext ...
+!> \param kp_shift ...
+!> \param gamma_centered ...
 !> \author JGH
 ! **************************************************************************************************
-   SUBROUTINE calculate_kp_orbitals(qs_env, kpoint, scheme, nadd, mp_grid, kpgeneral, group_size_ext)
+   SUBROUTINE calculate_kp_orbitals(qs_env, kpoint, scheme, nadd, mp_grid, kpgeneral, group_size_ext, &
+                                    kp_shift, gamma_centered)
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(kpoint_type), POINTER                         :: kpoint
       CHARACTER(LEN=*), INTENT(IN)                       :: scheme
@@ -308,6 +314,8 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(:, :), INTENT(IN), &
          OPTIONAL                                        :: kpgeneral
       INTEGER, INTENT(IN), OPTIONAL                      :: group_size_ext
+      REAL(KIND=dp), DIMENSION(3), INTENT(IN), OPTIONAL  :: kp_shift
+      LOGICAL, INTENT(IN), OPTIONAL                      :: gamma_centered
 
       LOGICAL                                            :: diis_step
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
@@ -319,7 +327,8 @@ CONTAINS
       TYPE(qs_scf_env_type), POINTER                     :: scf_env
       TYPE(scf_control_type), POINTER                    :: scf_control
 
-      CALL calculate_kpoints_for_bs(kpoint, scheme, group_size_ext, mp_grid, kpgeneral)
+      CALL calculate_kpoints_for_bs(kpoint, scheme, group_size_ext, mp_grid, kpgeneral, &
+                                    kp_shift, gamma_centered)
 
       CALL get_qs_env(qs_env=qs_env, para_env=para_env, blacs_env=blacs_env)
       CALL kpoint_env_initialize(kpoint, para_env, blacs_env)
@@ -343,8 +352,11 @@ CONTAINS
 !> \param group_size_ext ...
 !> \param mp_grid ...
 !> \param kpgeneral ...
+!> \param kp_shift ...
+!> \param gamma_centered ...
 ! **************************************************************************************************
-   SUBROUTINE calculate_kpoints_for_bs(kpoint, scheme, group_size_ext, mp_grid, kpgeneral)
+   SUBROUTINE calculate_kpoints_for_bs(kpoint, scheme, group_size_ext, mp_grid, kpgeneral, &
+                                       kp_shift, gamma_centered)
 
       TYPE(kpoint_type), POINTER                         :: kpoint
       CHARACTER(LEN=*), INTENT(IN)                       :: scheme
@@ -352,18 +364,36 @@ CONTAINS
       INTEGER, DIMENSION(3), INTENT(IN), OPTIONAL        :: mp_grid
       REAL(KIND=dp), DIMENSION(:, :), INTENT(IN), &
          OPTIONAL                                        :: kpgeneral
+      REAL(KIND=dp), DIMENSION(3), INTENT(IN), OPTIONAL  :: kp_shift
+      LOGICAL, INTENT(IN), OPTIONAL                      :: gamma_centered
 
-      INTEGER                                            :: i, ix, iy, iz, npoints
+      INTEGER                                            :: i, idim, ix, iy, iz, npoints
+      INTEGER, DIMENSION(3)                              :: ik
+      LOGICAL                                            :: gamma_mesh
+      REAL(KIND=dp), DIMENSION(3)                        :: kpt_latt, shift
 
       CPASSERT(.NOT. ASSOCIATED(kpoint))
 
       CALL kpoint_create(kpoint)
+
+      IF (PRESENT(kp_shift)) THEN
+         shift = kp_shift
+      ELSE
+         shift = 0.0_dp
+      END IF
+      IF (PRESENT(gamma_centered)) THEN
+         gamma_mesh = gamma_centered
+      ELSE
+         gamma_mesh = .FALSE.
+      END IF
 
       kpoint%kp_scheme = scheme
       kpoint%symmetry = .FALSE.
       kpoint%verbose = .FALSE.
       kpoint%full_grid = .FALSE.
       kpoint%use_real_wfn = .FALSE.
+      kpoint%gamma_centered = gamma_mesh
+      kpoint%kp_shift = shift
       kpoint%eps_geo = 1.e-6_dp
       IF (PRESENT(group_size_ext)) THEN
          kpoint%parallel_group_size = group_size_ext
@@ -380,7 +410,7 @@ CONTAINS
          ALLOCATE (kpoint%kp_sym(1))
          NULLIFY (kpoint%kp_sym(1)%kpoint_sym)
          CALL kpoint_sym_create(kpoint%kp_sym(1)%kpoint_sym)
-      CASE ("MONKHORST-PACK")
+      CASE ("MONKHORST-PACK", "MACDONALD")
          CPASSERT(PRESENT(mp_grid))
          npoints = mp_grid(1)*mp_grid(2)*mp_grid(3)
          kpoint%nkp_grid(1:3) = mp_grid(1:3)
@@ -393,9 +423,17 @@ CONTAINS
             DO iy = 1, mp_grid(2)
                DO iz = 1, mp_grid(3)
                   i = i + 1
-                  kpoint%xkp(1, i) = REAL(2*ix - mp_grid(1) - 1, KIND=dp)/(2._dp*REAL(mp_grid(1), KIND=dp))
-                  kpoint%xkp(2, i) = REAL(2*iy - mp_grid(2) - 1, KIND=dp)/(2._dp*REAL(mp_grid(2), KIND=dp))
-                  kpoint%xkp(3, i) = REAL(2*iz - mp_grid(3) - 1, KIND=dp)/(2._dp*REAL(mp_grid(3), KIND=dp))
+                  ik = [ix, iy, iz]
+                  DO idim = 1, 3
+                     IF (gamma_mesh .AND. MOD(mp_grid(idim), 2) == 0) THEN
+                        kpt_latt(idim) = REAL(2*ik(idim) - mp_grid(idim), KIND=dp)/ &
+                                         (2._dp*REAL(mp_grid(idim), KIND=dp))
+                     ELSE
+                        kpt_latt(idim) = REAL(2*ik(idim) - mp_grid(idim) - 1, KIND=dp)/ &
+                                         (2._dp*REAL(mp_grid(idim), KIND=dp))
+                     END IF
+                  END DO
+                  kpoint%xkp(1:3, i) = kpt_latt(1:3) + shift(1:3)
                END DO
             END DO
          END DO
@@ -405,8 +443,6 @@ CONTAINS
             NULLIFY (kpoint%kp_sym(i)%kpoint_sym)
             CALL kpoint_sym_create(kpoint%kp_sym(i)%kpoint_sym)
          END DO
-      CASE ("MACDONALD")
-         CPABORT("MACDONALD not implemented")
       CASE ("GENERAL")
          CPASSERT(PRESENT(kpgeneral))
          npoints = SIZE(kpgeneral, 2)

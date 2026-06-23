@@ -28,7 +28,9 @@ MODULE ec_environment
    USE cp_fm_struct,                    ONLY: cp_fm_struct_create,&
                                               cp_fm_struct_release,&
                                               cp_fm_struct_type
-   USE cp_log_handling,                 ONLY: cp_logger_get_default_unit_nr
+   USE cp_log_handling,                 ONLY: cp_get_default_logger,&
+                                              cp_logger_get_default_unit_nr,&
+                                              cp_logger_type
    USE dm_ls_scf_types,                 ONLY: ls_scf_env_type
    USE ec_env_types,                    ONLY: energy_correction_type
    USE input_constants,                 ONLY: &
@@ -57,6 +59,7 @@ MODULE ec_environment
                                               molecule_type
    USE orbital_pointers,                ONLY: init_orbital_pointers
    USE particle_types,                  ONLY: particle_type
+   USE qs_basis_rotation_methods,       ONLY: qs_basis_rotation
    USE qs_dispersion_nonloc,            ONLY: qs_dispersion_nonloc_init
    USE qs_dispersion_pairpot,           ONLY: qs_dispersion_pairpot_init
    USE qs_dispersion_types,             ONLY: qs_dispersion_type
@@ -140,6 +143,7 @@ CONTAINS
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_struct_type), POINTER                   :: fm_struct
+      TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(gto_basis_set_type), POINTER                  :: basis_set, harris_basis, &
                                                             harris_soft_basis
@@ -173,6 +177,7 @@ CONTAINS
       NULLIFY (ec_env%vxc_rspace)
       NULLIFY (ec_env%vtau_rspace)
       NULLIFY (ec_env%vadmm_rspace)
+      NULLIFY (ec_env%vadmm_tau_rspace)
       NULLIFY (ec_env%rhoout_r, ec_env%rhoz_r)
       NULLIFY (ec_env%x_data)
       ec_env%should_update = .TRUE.
@@ -187,7 +192,12 @@ CONTAINS
          CPASSERT(PRESENT(ec_section))
 
          ! get a useful output_unit
-         unit_nr = cp_logger_get_default_unit_nr(local=.FALSE.)
+         logger => cp_get_default_logger()
+         IF (logger%para_env%is_source()) THEN
+            unit_nr = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+         ELSE
+            unit_nr = -1
+         END IF
 
          CALL section_vals_val_get(ec_section, "ALGORITHM", &
                                    i_val=ec_env%ks_solver)
@@ -275,7 +285,7 @@ CONTAINS
             END IF
             CALL get_qs_env(qs_env, particle_set=particle_set, cell=cell)
             CALL kpoint_create(ec_env%kpoints)
-            CALL read_kpoint_section(ec_env%kpoints, kp_section, cell%hmat)
+            CALL read_kpoint_section(ec_env%kpoints, kp_section, cell%hmat, cell)
             CALL kpoint_initialize(ec_env%kpoints, particle_set, cell)
             CALL get_qs_env(qs_env, para_env=para_env, blacs_env=blacs_env)
             CALL kpoint_env_initialize(ec_env%kpoints, para_env, blacs_env)
@@ -480,6 +490,7 @@ CONTAINS
             END DO
             CALL kpoint_initialize_mos(ec_env%kpoints, mo_set)
             CALL kpoint_initialize_mo_set(ec_env%kpoints)
+            CALL qs_basis_rotation(qs_env, ec_env%kpoints, basis_type="HARRIS")
             DO ispin = 1, nspins
                CALL deallocate_mo_set(mo_set(ispin))
             END DO
@@ -622,11 +633,17 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'ec_write_input'
 
       INTEGER                                            :: handle, unit_nr
+      TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(ls_scf_env_type), POINTER                     :: ls_env
 
       CALL timeset(routineN, handle)
 
-      unit_nr = cp_logger_get_default_unit_nr(local=.FALSE.)
+      logger => cp_get_default_logger()
+      IF (logger%para_env%is_source()) THEN
+         unit_nr = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+      ELSE
+         unit_nr = -1
+      END IF
 
       IF (unit_nr > 0) THEN
 

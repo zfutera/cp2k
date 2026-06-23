@@ -68,6 +68,9 @@ html_theme_options = {
 redirects = {
     "getting-started/CMake": "build-from-source.html",
     "getting-started/spack": "build-with-spack.html",
+    "methods/optimization/geometry": "geometry_and_cell_opt.html",
+    "methods/properties/bandstructure_gw": "../electronic_structure/band/gw.html",
+    "methods/properties/resp_charges": "../electronic_structure/population/resp.html",
 }
 
 # EOF

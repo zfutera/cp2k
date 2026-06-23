@@ -23,7 +23,7 @@ ASPC
     Always Stable Predictor-Corrector [→ more](methods/sampling/molecular_dynamics)
 
 BFGS
-    Broyden–Fletcher–Goldfarb–Shanno algorithm [→ more](methods/optimization/geometry)
+    Broyden–Fletcher–Goldfarb–Shanno algorithm [→ more](methods/optimization/geometry_and_cell_opt)
 
 BOMD
     Born-Oppenheimer Molecular Dynamics [→ more](methods/sampling/molecular_dynamics)
@@ -41,7 +41,7 @@ CDFT-CI
     Constrained Density Functional Theory Configuration Interaction [→ more](methods/dft/constrained)
 
 CG
-    Conjugated Gradients algorithm [→ more](methods/optimization/geometry)
+    Conjugated Gradients algorithm [→ more](methods/optimization/geometry_and_cell_opt)
 
 CHARMM
     Chemistry at HARvard Molecular Mechanics
@@ -236,7 +236,7 @@ NEB
     Nudged Elastic Band [→ more](methods/optimization/nudged_elastic_band)
 
 NEGF
-    Non-Equilibrium Green's Function [→ more](methods/properties/bandstructure_gw)
+    Non-Equilibrium Green's Function [→ more](methods/electronic_structure/band/gw)
 
 NMR
     Nuclear Magnetic Resonance [→ more](methods/properties/nmr)
@@ -308,7 +308,7 @@ QS
     Quick Step (cp2k's quantum methods implementation) [→ more](methods/dft/gpw)
 
 RESP
-    Restrained ElectroStatic Potential [→ more](methods/properties/resp_charges)
+    Restrained ElectroStatic Potential [→ more](methods/electronic_structure/population/resp)
 
 RESPA
     REversible reference System Propagator Algorithm

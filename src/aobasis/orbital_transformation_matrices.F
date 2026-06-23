@@ -353,7 +353,7 @@ CONTAINS
          r2(0, 0) = (3.0_dp*r1(0, 0)**2 - 1.0_dp)*0.5_dp
          r2(0, 1) = s3*r1(0, 1)*r1(0, 0)
          r2(0, -1) = s3*r1(0, -1)*r1(0, 0)
-         r2(0, -2) = s3*(r1(0, 1)**2 - r1(0, -1)**2)*0.5_dp
+         r2(0, 2) = s3*(r1(0, 1)**2 - r1(0, -1)**2)*0.5_dp
          r2(0, -2) = s3*r1(0, 1)*r1(0, -1)
          !
          r2(1, 0) = s3*r1(1, 0)*r1(0, 0)
@@ -375,10 +375,10 @@ CONTAINS
          r2(2, -2) = r1(1, 1)*r1(1, -1) - r1(-1, 1)*r1(-1, -1)
          !
          r2(-2, 0) = s3*r1(1, 0)*r1(-1, 0)
-         r2(2, 1) = r1(1, 1)*r1(-1, 0) + r1(1, 0)*r1(-1, 1)
-         r2(2, -1) = r1(1, -1)*r1(-1, 0) + r1(1, 0)*r1(-1, -1)
-         r2(2, 2) = r1(1, 1)*r1(-1, 1) - r1(1, -1)*r1(-1, -1)
-         r2(2, -2) = r1(1, 1)*r1(-1, -1) + r1(1, -1)*r1(-1, 1)
+         r2(-2, 1) = r1(1, 1)*r1(-1, 0) + r1(1, 0)*r1(-1, 1)
+         r2(-2, -1) = r1(1, -1)*r1(-1, 0) + r1(1, 0)*r1(-1, -1)
+         r2(-2, 2) = r1(1, 1)*r1(-1, 1) - r1(1, -1)*r1(-1, -1)
+         r2(-2, -2) = r1(1, 1)*r1(-1, -1) + r1(1, -1)*r1(-1, 1)
          !
          orbrotmat(2)%mat(1:5, 1:5) = r2(-2:2, -2:2)
       END IF
@@ -503,10 +503,12 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(0:lr, -lr:lr, -lr:lr)     :: r
       REAL(KIND=dp)                                      :: p
 
-      IF (m == l) THEN
-         p = r1(i, 1)*r(l - 1, mu, m) - r1(i, -1)*r(l - 1, mu, -m)
+      IF (ABS(mu) > l - 1) THEN
+         p = 0.0_dp
+      ELSE IF (m == l) THEN
+         p = r1(i, 1)*r(l - 1, mu, l - 1) - r1(i, -1)*r(l - 1, mu, -l + 1)
       ELSE IF (m == -l) THEN
-         p = r1(i, 1)*r(l - 1, mu, m) + r1(i, -1)*r(l - 1, mu, -m)
+         p = r1(i, 1)*r(l - 1, mu, -l + 1) + r1(i, -1)*r(l - 1, mu, l - 1)
       ELSE IF (ABS(m) < l) THEN
          p = r1(i, 0)*r(l - 1, mu, m)
       ELSE
@@ -540,13 +542,13 @@ CONTAINS
          v = p_func(1, l, 1, mb, r1, r, lr) + p_func(-1, l, -1, mb, r1, r, lr)
          w = 0.0_dp
       ELSE IF (ma > 0) THEN
-         dd = 1.0_dp
+         dd = 0.0_dp
          IF (ma == 1) dd = 1.0_dp
          u = p_func(0, l, ma, mb, r1, r, lr)
          v = p_func(1, l, ma - 1, mb, r1, r, lr)*SQRT(1.0_dp + dd) - p_func(-1, l, -ma + 1, mb, r1, r, lr)*(1.0_dp - dd)
          w = p_func(1, l, ma + 1, mb, r1, r, lr) + p_func(-1, l, -1 - ma, mb, r1, r, lr)
       ELSE IF (ma < 0) THEN
-         dd = 1.0_dp
+         dd = 0.0_dp
          IF (ma == -1) dd = 1.0_dp
          u = p_func(0, l, ma, mb, r1, r, lr)
          v = p_func(1, l, ma + 1, mb, r1, r, lr)*(1.0_dp - dd) + p_func(-1, l, -ma - 1, mb, r1, r, lr)*SQRT(1.0_dp + dd)

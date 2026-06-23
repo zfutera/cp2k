@@ -43,6 +43,7 @@
       A -3.85000/-2 -3.85*+SQRT(3.000e00)/2 COS(+9.E001)
       B +3.850/+2.0 -0.385E1*-TAN(+6E+01)/2 -LOG(01)/-10
       C -SIN(0) +000/342 +LOG10(+0.10)*6.366*+EXP(-00.000)/-COS(0.000E-5)
+      CANONICALIZE T
       MULTIPLE_UNIT_CELL 3 3 3
       PERIODIC XYZ
       &CELL_REF
@@ -94,7 +95,6 @@
     PRESSURE_TOLERANCE [bar] 10.0
     RMS_DR 0.000003
     RMS_FORCE 0.0000003
-    TYPE direct_cell_opt
     &BFGS
       TRUST_RADIUS 0.1
       USE_MODEL_HESSIAN no

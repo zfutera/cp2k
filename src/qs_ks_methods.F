@@ -32,6 +32,8 @@ MODULE qs_ks_methods
                                               calc_admm_ovlp_forces_kp
    USE admm_types,                      ONLY: admm_type,&
                                               get_admm_env
+   USE atomic_kind_types,               ONLY: atomic_kind_type,&
+                                              get_atomic_kind_set
    USE cell_types,                      ONLY: cell_type
    USE cp_control_types,                ONLY: dft_control_type
    USE cp_dbcsr_api,                    ONLY: &
@@ -49,8 +51,11 @@ MODULE qs_ks_methods
    USE cp_output_handling,              ONLY: cp_p_file,&
                                               cp_print_key_should_output
    USE dft_plus_u,                      ONLY: plus_u
+   USE gce_methods,                     ONLY: planar_averaged_v_hartree_3d,&
+                                              planar_counter_charge
    USE hartree_local_methods,           ONLY: Vh_1c_gg_integrals
    USE hartree_local_types,             ONLY: ecoul_1center_type
+   USE hfx_ace_methods,                 ONLY: hfx_ace_ks_matrix
    USE hfx_admm_utils,                  ONLY: hfx_admm_init,&
                                               hfx_ks_matrix,&
                                               hfx_ks_matrix_kp
@@ -60,7 +65,8 @@ MODULE qs_ks_methods
                                               smeagol_runtype_emtransport
    USE input_section_types,             ONLY: section_vals_get,&
                                               section_vals_get_subs_vals,&
-                                              section_vals_type
+                                              section_vals_type,&
+                                              section_vals_val_get
    USE kg_correction,                   ONLY: kg_ekin_subset
    USE kinds,                           ONLY: default_string_length,&
                                               dp
@@ -72,6 +78,7 @@ MODULE qs_ks_methods
                                               lri_kind_type
    USE mathlib,                         ONLY: abnormal_value
    USE message_passing,                 ONLY: mp_para_env_type
+   USE particle_types,                  ONLY: particle_type
    USE pw_env_types,                    ONLY: pw_env_get,&
                                               pw_env_type
    USE pw_methods,                      ONLY: pw_axpy,&
@@ -99,12 +106,14 @@ MODULE qs_ks_methods
    USE qs_energy_types,                 ONLY: qs_energy_type
    USE qs_environment_types,            ONLY: get_qs_env,&
                                               qs_environment_type
+   USE qs_force_types,                  ONLY: qs_force_type
    USE qs_gapw_densities,               ONLY: prepare_gapw_den
    USE qs_harris_types,                 ONLY: harris_type
    USE qs_harris_utils,                 ONLY: harris_set_potentials
    USE qs_integrate_potential,          ONLY: integrate_ppl_rspace,&
                                               integrate_rho_nlcc,&
                                               integrate_v_core_rspace
+   USE qs_kind_types,                   ONLY: qs_kind_type
    USE qs_ks_apply_restraints,          ONLY: qs_ks_cdft_constraint,&
                                               qs_ks_mulliken_restraint,&
                                               qs_ks_s2_restraint
@@ -114,7 +123,7 @@ MODULE qs_ks_methods
    USE qs_ks_types,                     ONLY: qs_ks_env_type,&
                                               set_ks_env
    USE qs_ks_utils,                     ONLY: &
-        calc_v_sic_rspace, calculate_zmp_potential, compute_matrix_vxc, &
+        calc_v_sic_rspace, calculate_zmp_potential, compute_matrix_vxc, compute_matrix_vxc_kp, &
         get_embed_potential_energy, low_spin_roks, print_densities, print_detailed_energy, &
         sic_explicit_orbitals, sum_up_and_integrate
    USE qs_local_rho_types,              ONLY: local_rho_type
@@ -130,10 +139,15 @@ MODULE qs_ks_methods
    USE rtp_admm_methods,                ONLY: rtp_admm_calc_rho_aux,&
                                               rtp_admm_merge_ks_matrix
    USE se_fock_matrix,                  ONLY: build_se_fock_matrix
+   USE skala_gpw_functional,            ONLY: ensure_native_skala_grid_scope,&
+                                              get_gauxc_section,&
+                                              xc_section_uses_native_skala_grid
    USE smeagol_interface,               ONLY: smeagol_shift_v_hartree
    USE surface_dipole,                  ONLY: calc_dipsurf_potential
    USE tblite_ks_matrix,                ONLY: build_tblite_ks_matrix
    USE virial_types,                    ONLY: virial_type
+   USE xc_gauxc_functional,             ONLY: apply_gauxc,&
+                                              gauxc_gapw_has_paw_pseudopotentials
    USE xtb_ks_matrix,                   ONLY: build_xtb_ks_matrix
 #include "./base/base_uses.f90"
 
@@ -145,7 +159,7 @@ MODULE qs_ks_methods
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'qs_ks_methods'
 
    PUBLIC :: calc_rho_tot_gspace, qs_ks_update_qs_env, qs_ks_build_kohn_sham_matrix, &
-             qs_ks_allocate_basics, evaluate_core_matrix_traces
+             qs_ks_allocate_basics, evaluate_core_matrix_traces, rebuild_ks_matrix
 
 CONTAINS
 
@@ -186,28 +200,39 @@ CONTAINS
       CHARACTER(LEN=*), PARAMETER :: routineN = 'qs_ks_build_kohn_sham_matrix'
 
       CHARACTER(len=default_string_length)               :: name
-      INTEGER                                            :: handle, iatom, img, ispin, nimages, &
-                                                            nspins
-      LOGICAL :: do_adiabatic_rescaling, do_ddapc, do_hfx, do_ppl, dokp, gapw, gapw_xc, &
-         just_energy_xc, lrigpw, my_print, rigpw, use_virial
+      INTEGER                                            :: ace_rebuild_frequency, atom_a, handle, &
+                                                            iatom, ikind, img, ispin, natom, &
+                                                            nimages, nspins, output_unit
+      INTEGER, ALLOCATABLE, DIMENSION(:)                 :: atom_of_kind, kind_of
+      LOGICAL :: ace_active, do_adiabatic_rescaling, do_ddapc, do_hfx, do_kpoints, do_ppl, dokp, &
+         gapw, gapw_xc, just_energy_xc, lrigpw, my_print, native_grid_diagnostics, &
+         native_grid_use_cuda, native_skala_restore_exc, rigpw, use_gauxc_matrix, use_virial
+      LOGICAL, SAVE :: native_grid_cpu_kpoints_warned = .FALSE.
       REAL(KIND=dp)                                      :: ecore_ppl, edisp, ee_ener, ekin_mol, &
-                                                            mulliken_order_p, vscale
+                                                            mulliken_order_p, &
+                                                            native_skala_exc_scf, &
+                                                            native_skala_total_scf, vscale
+      REAL(KIND=dp), ALLOCATABLE, DIMENSION(:, :)        :: native_skala_atom_force
       REAL(KIND=dp), DIMENSION(3, 3)                     :: h_stress, pv_loc
       TYPE(admm_type), POINTER                           :: admm_env
+      TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cdft_control_type), POINTER                   :: cdft_control
       TYPE(cell_type), POINTER                           :: cell
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: ksmat, matrix_vxc, mo_derivs
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: ks_matrix, ks_matrix_im, matrix_h, &
-                                                            matrix_h_im, matrix_s, my_rho, rho_ao
+                                                            matrix_h_im, matrix_s, matrix_vxc_kp, &
+                                                            my_rho, rho_ao
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(ecoul_1center_type), DIMENSION(:), POINTER    :: ecoul_1c
       TYPE(harris_type), POINTER                         :: harris_env
+      TYPE(kpoint_type), POINTER                         :: kpoints
       TYPE(local_rho_type), POINTER                      :: local_rho_set
       TYPE(lri_density_type), POINTER                    :: lri_density
       TYPE(lri_environment_type), POINTER                :: lri_env
       TYPE(lri_kind_type), DIMENSION(:), POINTER         :: lri_v_int
       TYPE(mp_para_env_type), POINTER                    :: para_env
+      TYPE(particle_type), DIMENSION(:), POINTER         :: particle_set
       TYPE(pw_c1d_gs_type)                               :: rho_tot_gspace, v_hartree_gspace
       TYPE(pw_c1d_gs_type), POINTER                      :: rho_core
       TYPE(pw_env_type), POINTER                         :: pw_env
@@ -219,27 +244,34 @@ CONTAINS
       TYPE(pw_r3d_rs_type), POINTER :: rho0_s_rs, rho_nlcc, rhoz_cneo_s_rs, v_hartree_rspace, &
          v_sccs_rspace, v_sic_rspace, v_spin_ddapc_rest_r, vee, vppl_rspace
       TYPE(qs_energy_type), POINTER                      :: energy
+      TYPE(qs_force_type), DIMENSION(:), POINTER         :: force
+      TYPE(qs_kind_type), DIMENSION(:), POINTER          :: qs_kind_set
       TYPE(qs_ks_env_type), POINTER                      :: ks_env
       TYPE(qs_rho_type), POINTER                         :: rho, rho1, rho_struct, rho_xc
-      TYPE(section_vals_type), POINTER                   :: adiabatic_rescaling_section, &
-                                                            hfx_sections, input, scf_section, &
-                                                            xc_section
+      TYPE(section_vals_type), POINTER                   :: ace_section, &
+                                                            adiabatic_rescaling_section, &
+                                                            gauxc_section, hfx_sections, input, &
+                                                            scf_section, xc_section
       TYPE(virial_type), POINTER                         :: virial
 
       CALL timeset(routineN, handle)
-      NULLIFY (admm_env, cell, dft_control, logger, mo_derivs, my_rho, &
+      NULLIFY (admm_env, atomic_kind_set, cell, dft_control, force, logger, mo_derivs, my_rho, &
                rho_struct, para_env, pw_env, virial, vppl_rspace, &
-               adiabatic_rescaling_section, hfx_sections, &
-               input, scf_section, xc_section, matrix_h, matrix_h_im, matrix_s, &
-               auxbas_pw_pool, poisson_env, v_rspace_new, v_rspace_new_aux_fit, &
-               v_tau_rspace, v_tau_rspace_aux_fit, matrix_vxc, vee, rho_nlcc, &
-               ks_env, ks_matrix, ks_matrix_im, rho, energy, rho_xc, rho_r, rho_ao, rho_core)
+               ace_section, &
+               adiabatic_rescaling_section, hfx_sections, input, scf_section, &
+               xc_section, gauxc_section, matrix_h, matrix_h_im, matrix_s, auxbas_pw_pool, poisson_env, &
+               v_rspace_new, v_rspace_new_aux_fit, v_tau_rspace, v_tau_rspace_aux_fit, matrix_vxc, &
+               matrix_vxc_kp, &
+               vee, rho_nlcc, ks_env, ks_matrix, ks_matrix_im, rho, energy, rho_xc, rho_r, rho_ao, &
+               rho_core, particle_set, qs_kind_set, kpoints)
 
       CPASSERT(ASSOCIATED(qs_env))
 
       logger => cp_get_default_logger()
       my_print = .TRUE.
       IF (PRESENT(print_active)) my_print = print_active
+      use_gauxc_matrix = .FALSE.
+      native_skala_restore_exc = .FALSE.
 
       CALL get_qs_env(qs_env, &
                       ks_env=ks_env, &
@@ -250,8 +282,10 @@ CONTAINS
                       matrix_ks_kp=ks_matrix, &
                       matrix_ks_im_kp=ks_matrix_im, &
                       matrix_vxc=matrix_vxc, &
+                      matrix_vxc_kp=matrix_vxc_kp, &
                       pw_env=pw_env, &
                       cell=cell, &
+                      atomic_kind_set=atomic_kind_set, &
                       para_env=para_env, &
                       input=input, &
                       virial=virial, &
@@ -261,7 +295,13 @@ CONTAINS
                       rho=rho, &
                       rho_core=rho_core, &
                       rho_xc=rho_xc, &
-                      energy=energy)
+                      energy=energy, &
+                      force=force, &
+                      kpoints=kpoints, &
+                      do_kpoints=do_kpoints, &
+                      particle_set=particle_set, &
+                      qs_kind_set=qs_kind_set, &
+                      natom=natom)
 
       CALL qs_rho_get(rho, rho_r=rho_r, rho_ao_kp=rho_ao)
 
@@ -361,6 +401,15 @@ CONTAINS
       ! Get the total density in g-space [ions + electrons]
       CALL calc_rho_tot_gspace(rho_tot_gspace, qs_env, rho)
 
+      IF (qs_env%scf_control%gce%do_gce .AND. .NOT. dft_control%do_pcc) THEN
+         CPABORT("GCE requires DFT%PLANAR_COUNTER_CHARGE to define the countercharge plane.")
+      END IF
+
+      ! Add the planar counter charge density
+      IF (dft_control%do_pcc) THEN
+         CALL planar_counter_charge(rho_tot_gspace, dft_control%pcc_control, auxbas_pw_pool)
+      END IF
+
       IF (my_print) THEN
          CALL print_densities(qs_env, rho)
       END IF
@@ -397,6 +446,12 @@ CONTAINS
             CALL pw_poisson_solve(poisson_env, rho_tot_gspace, energy%hartree, &
                                   v_hartree_gspace, rho_core=rho_core)
          END IF
+      END IF
+
+      IF (dft_control%do_paep .OR. qs_env%scf_control%gce%do_gce) THEN
+         CALL pw_transfer(v_hartree_gspace, v_hartree_rspace)
+         CALL planar_averaged_v_hartree_3d(v_hartree_rspace, dft_control, qs_env%scf_control%gce%do_gce, &
+                                           qs_env%scf_control%gce%ref_esp, para_env)
       END IF
 
       ! In case decouple periodic images and/or apply restraints to charges
@@ -546,7 +601,8 @@ CONTAINS
             CALL calculate_vxc_atom(qs_env, energy_only=just_energy_xc, exc1=energy%exc1_aux_fit, &
                                     kind_set_external=admm_env%admm_gapw_env%admm_kind_set, &
                                     xc_section_external=xc_section, &
-                                    rho_atom_set_external=admm_env%admm_gapw_env%local_rho_set%rho_atom_set)
+                                    rho_atom_set_external=admm_env%admm_gapw_env%local_rho_set%rho_atom_set, &
+                                    calculate_forces=calculate_forces)
 
          END IF
 
@@ -579,34 +635,132 @@ CONTAINS
          energy%exc = 0.0_dp
          CALL calculate_zmp_potential(qs_env, v_rspace_new, rho, exc=energy%exc)
       ELSE
-         ! Embedding potential
+         ! Embedding potential (runs regardless of XC method)
          IF (dft_control%apply_embed_pot) THEN
             NULLIFY (v_rspace_embed)
             energy%embed_corr = 0.0_dp
             CALL get_embed_potential_energy(qs_env, rho, v_rspace_embed, dft_control, &
                                             energy%embed_corr, just_energy)
          END IF
-         ! Everything else
-         CALL qs_vxc_create(ks_env=ks_env, rho_struct=rho_struct, xc_section=xc_section, &
-                            vxc_rho=v_rspace_new, vxc_tau=v_tau_rspace, exc=energy%exc, &
-                            edisp=edisp, dispersion_env=qs_env%dispersion_env, &
-                            just_energy=just_energy_xc)
-         IF (edisp /= 0.0_dp) energy%dispersion = edisp
-         IF (qs_env%requires_matrix_vxc .AND. ASSOCIATED(v_rspace_new)) THEN
-            CALL compute_matrix_vxc(qs_env=qs_env, v_rspace=v_rspace_new, matrix_vxc=matrix_vxc)
-            CALL set_ks_env(ks_env, matrix_vxc=matrix_vxc)
-         END IF
 
-         IF (gapw .OR. gapw_xc) THEN
-            CALL calculate_vxc_atom(qs_env, just_energy_xc, energy%exc1, xc_section_external=xc_section)
-            ! test for not implemented (bug) option
-            IF (use_virial .AND. calculate_forces) THEN
-               IF (ASSOCIATED(v_tau_rspace)) THEN
-                  CPABORT("MGGA STRESS with GAPW/GAPW_XC not implemneted")
+         ! Everything else, either via GauXC or manual XC computation
+         IF (dft_control%use_gauxc) THEN
+            IF (xc_section_uses_native_skala_grid(xc_section)) THEN
+               CALL ensure_native_skala_grid_scope(xc_section)
+               IF ((.NOT. do_kpoints) .AND. nimages /= 1) THEN
+                  CALL cp_abort(__LOCATION__, &
+                                "Native SKALA grid evaluation supports multiple images only "// &
+                                "for k-point calculations.")
+               END IF
+               IF (do_kpoints) THEN
+                  CPASSERT(ASSOCIATED(kpoints))
+                  gauxc_section => get_gauxc_section(xc_section)
+                  CPASSERT(ASSOCIATED(gauxc_section))
+                  CALL section_vals_val_get(gauxc_section, "NATIVE_GRID_USE_CUDA", l_val=native_grid_use_cuda)
+                  IF (.NOT. native_grid_use_cuda) THEN
+                     IF (para_env%mepos == 0 .AND. .NOT. native_grid_cpu_kpoints_warned) THEN
+                        CALL cp_warn(__LOCATION__, &
+                                     "Native SKALA grid evaluation with k-points is using the CPU TorchScript "// &
+                                     "path. For CPU runs, preload libtorch_cpu.so before OpenBLAS if the "// &
+                                     "runtime library order is unstable; otherwise use NATIVE_GRID_USE_CUDA T.")
+                        native_grid_cpu_kpoints_warned = .TRUE.
+                     END IF
+                  END IF
+               END IF
+               IF (dft_control%roks) THEN
+                  CPABORT("Native SKALA grid evaluation does not support ROKS.")
+               END IF
+               IF (dft_control%do_admm) THEN
+                  CPABORT("Native SKALA grid evaluation does not support ADMM.")
+               END IF
+               ! Force-only rebuilds re-enter this path for derivatives and VXC only.
+               ! For analytical stress the XC volume term must stay consistent with
+               ! the rebuilt SKALA energy used by the autograd virial.
+               native_skala_restore_exc = calculate_forces .AND. .NOT. use_virial
+               IF (native_skala_restore_exc) THEN
+                  native_skala_exc_scf = energy%exc
+                  native_skala_total_scf = energy%total
+               END IF
+               IF (calculate_forces) THEN
+                  ALLOCATE (native_skala_atom_force(3, natom))
+                  CALL qs_vxc_create(ks_env=ks_env, rho_struct=rho_struct, xc_section=xc_section, &
+                                     vxc_rho=v_rspace_new, vxc_tau=v_tau_rspace, exc=energy%exc, &
+                                     edisp=edisp, dispersion_env=qs_env%dispersion_env, &
+                                     just_energy=just_energy_xc, &
+                                     native_skala_atom_force=native_skala_atom_force)
+                  native_grid_diagnostics = .FALSE.
+                  gauxc_section => get_gauxc_section(xc_section)
+                  IF (ASSOCIATED(gauxc_section)) THEN
+                     CALL section_vals_val_get(gauxc_section, "NATIVE_GRID_DIAGNOSTICS", &
+                                               l_val=native_grid_diagnostics)
+                  END IF
+                  IF (native_grid_diagnostics .AND. para_env%mepos == 0) THEN
+                     output_unit = cp_logger_get_default_io_unit()
+                     IF (output_unit > 0) THEN
+                        DO iatom = 1, natom
+                           WRITE (UNIT=output_unit, FMT="(T2,A,1X,I0,3(1X,ES20.12))") &
+                              "SKALA_GPW| Native atom force", iatom, native_skala_atom_force(:, iatom)
+                        END DO
+                     END IF
+                  END IF
+                  CPASSERT(ASSOCIATED(force))
+                  CPASSERT(ASSOCIATED(atomic_kind_set))
+                  CALL get_atomic_kind_set(atomic_kind_set, atom_of_kind=atom_of_kind, kind_of=kind_of)
+                  DO iatom = 1, natom
+                     ikind = kind_of(iatom)
+                     atom_a = atom_of_kind(iatom)
+                     force(ikind)%rho_elec(:, atom_a) = force(ikind)%rho_elec(:, atom_a) + &
+                                                        native_skala_atom_force(:, iatom)
+                  END DO
+                  DEALLOCATE (atom_of_kind, kind_of, native_skala_atom_force)
+               ELSE
+                  CALL qs_vxc_create(ks_env=ks_env, rho_struct=rho_struct, xc_section=xc_section, &
+                                     vxc_rho=v_rspace_new, vxc_tau=v_tau_rspace, exc=energy%exc, &
+                                     edisp=edisp, dispersion_env=qs_env%dispersion_env, &
+                                     just_energy=just_energy_xc)
+               END IF
+               IF (native_skala_restore_exc) energy%exc = native_skala_exc_scf
+               IF (gapw .OR. gapw_xc) THEN
+                  CALL calculate_vxc_atom(qs_env, just_energy_xc, energy%exc1, &
+                                          xc_section_external=xc_section, &
+                                          calculate_forces=calculate_forces)
+               END IF
+               IF (edisp /= 0.0_dp) energy%dispersion = edisp
+               IF (qs_env%requires_matrix_vxc .AND. ASSOCIATED(v_rspace_new)) THEN
+                  IF (do_kpoints) THEN
+                     CALL compute_matrix_vxc_kp(qs_env=qs_env, v_rspace=v_rspace_new, matrix_vxc_kp=matrix_vxc_kp)
+                     CALL set_ks_env(ks_env, matrix_vxc_kp=matrix_vxc_kp)
+                  ELSE
+                     CALL compute_matrix_vxc(qs_env=qs_env, v_rspace=v_rspace_new, matrix_vxc=matrix_vxc)
+                     CALL set_ks_env(ks_env, matrix_vxc=matrix_vxc)
+                  END IF
+               END IF
+            ELSE
+               use_gauxc_matrix = .TRUE.
+               CALL apply_gauxc(qs_env, xc_section, calculate_forces)
+               IF (gapw_xc .OR. (gapw .AND. gauxc_gapw_has_paw_pseudopotentials(qs_kind_set))) THEN
+                  CALL calculate_vxc_atom(qs_env, just_energy_xc, energy%exc1, &
+                                          xc_section_external=xc_section, &
+                                          calculate_forces=calculate_forces)
                END IF
             END IF
-         END IF
+         ELSE
+            CALL qs_vxc_create(ks_env=ks_env, rho_struct=rho_struct, xc_section=xc_section, &
+                               vxc_rho=v_rspace_new, vxc_tau=v_tau_rspace, exc=energy%exc, &
+                               edisp=edisp, dispersion_env=qs_env%dispersion_env, &
+                               just_energy=just_energy_xc)
+            IF (edisp /= 0.0_dp) energy%dispersion = edisp
+            IF (qs_env%requires_matrix_vxc .AND. ASSOCIATED(v_rspace_new)) THEN
+               CALL compute_matrix_vxc(qs_env=qs_env, v_rspace=v_rspace_new, matrix_vxc=matrix_vxc)
+               CALL set_ks_env(ks_env, matrix_vxc=matrix_vxc)
+            END IF
 
+            IF (gapw .OR. gapw_xc) THEN
+               CALL calculate_vxc_atom(qs_env, just_energy_xc, energy%exc1, &
+                                       xc_section_external=xc_section, &
+                                       calculate_forces=calculate_forces)
+            END IF
+         END IF
       END IF
 
       ! set hartree and xc potentials for use in Harris method
@@ -624,13 +778,36 @@ CONTAINS
       ! *** Add Hartree-Fock contribution if required ***
       hfx_sections => section_vals_get_subs_vals(xc_section, "HF")
       CALL section_vals_get(hfx_sections, explicit=do_hfx)
+
+      ace_active = .FALSE.
+      ace_rebuild_frequency = 1
+
+      IF (do_hfx) THEN
+         ace_section => section_vals_get_subs_vals(hfx_sections, "ACE")
+         IF (ASSOCIATED(ace_section)) THEN
+            CALL section_vals_val_get(ace_section, "ACTIVE", l_val=ace_active)
+            CALL section_vals_val_get(ace_section, "REBUILD_FREQUENCY", i_val=ace_rebuild_frequency)
+         END IF
+      END IF
+
       IF (do_hfx) THEN
          IF (dokp) THEN
-            CALL hfx_ks_matrix_kp(qs_env, ks_matrix, energy, calculate_forces)
+            IF (ace_active) THEN
+               CPABORT("ACE-HFX for k-points is not implemented yet")
+            ELSE
+               CALL hfx_ks_matrix_kp(qs_env, ks_matrix, energy, calculate_forces)
+            END IF
+
          ELSE
             ! ext_xc_section may contain a hfx section
-            CALL hfx_ks_matrix(qs_env, ks_matrix, rho, energy, calculate_forces, &
-                               just_energy, v_rspace_new, v_tau_rspace, ext_xc_section=xc_section)
+            IF (ace_active) THEN
+               CALL hfx_ace_ks_matrix(qs_env, ks_matrix, rho, energy, calculate_forces, &
+                                      just_energy, v_rspace_new, v_tau_rspace, &
+                                      ace_rebuild_frequency, ext_xc_section=xc_section)
+            ELSE
+               CALL hfx_ks_matrix(qs_env, ks_matrix, rho, energy, calculate_forces, &
+                                  just_energy, v_rspace_new, v_tau_rspace, ext_xc_section=xc_section)
+            END IF
          END IF
       END IF !do_hfx
 
@@ -651,7 +828,6 @@ CONTAINS
       ! calculate KG correction
       IF (dft_control%qs_control%do_kg .AND. just_energy) THEN
 
-         CPASSERT(.NOT. (gapw .OR. gapw_xc))
          CPASSERT(nimages == 1)
          ksmat => ks_matrix(:, 1)
          CALL kg_ekin_subset(qs_env, ksmat, ekin_mol, calculate_forces, do_kernel=.FALSE.)
@@ -716,6 +892,26 @@ CONTAINS
                                    v_sic_rspace, v_spin_ddapc_rest_r, v_sccs_rspace, v_rspace_embed, &
                                    cdft_control, calculate_forces)
 
+         IF (use_gauxc_matrix) THEN
+            IF (dokp) THEN
+               CALL get_qs_env(qs_env=qs_env, matrix_vxc_kp=matrix_vxc_kp)
+               CPASSERT(ASSOCIATED(matrix_vxc_kp))
+               DO ispin = 1, nspins
+                  DO img = 1, nimages
+                     CALL dbcsr_add(ks_matrix(ispin, img)%matrix, matrix_vxc_kp(ispin, img)%matrix, &
+                                    1.0_dp, 1.0_dp)
+                  END DO
+               END DO
+            ELSE
+               CALL get_qs_env(qs_env=qs_env, matrix_vxc=matrix_vxc)
+               CPASSERT(ASSOCIATED(matrix_vxc))
+               CPASSERT(nimages == 1)
+               DO ispin = 1, nspins
+                  CALL dbcsr_add(ks_matrix(ispin, 1)%matrix, matrix_vxc(ispin)%matrix, 1.0_dp, 1.0_dp)
+               END DO
+            END IF
+         END IF
+
          IF (gapw .OR. gapw_xc) THEN
             IF (calculate_forces) THEN
                IF (gapw_xc) THEN
@@ -724,13 +920,29 @@ CONTAINS
                   CALL get_qs_env(qs_env=qs_env, rho=rho_struct)
                END IF
                NULLIFY (rho1)
-               CALL accint_weight_force(qs_env, rho_struct, rho1, 0, xc_section)
+               IF (dft_control%use_gauxc .AND. (gapw .OR. gapw_xc) .AND. &
+                   .NOT. xc_section_uses_native_skala_grid(xc_section)) THEN
+                  ! Molecular GauXC evaluates the XC term outside xc_derivatives.
+                  ! The accurate-XCINT force correction would otherwise try to
+                  ! evaluate the GAUXC section through CP2K's local functional path.
+                  ! Native-grid SKALA can provide this correction through the
+                  ! CP2K grid path and needs it for GAPW_XC force consistency.
+                  CONTINUE
+               ELSE
+                  CALL accint_weight_force(qs_env, rho_struct, rho1, 0, xc_section)
+               END IF
                !
                IF (dft_control%do_admm) THEN
                   CALL get_qs_env(qs_env, admm_env=admm_env)
                   xc_section => admm_env%xc_section_aux
                   CALL get_admm_env(admm_env, rho_aux_fit=rho_struct)
-                  CALL accint_weight_force(qs_env, rho_struct, rho1, 0, xc_section)
+                  vscale = 1.0_dp
+                  IF (admm_env%do_admmp) THEN
+                     vscale = admm_env%gsi(1)**2
+                  ELSE IF (admm_env%do_admms) THEN
+                     vscale = admm_env%gsi(1)**(2.0_dp/3.0_dp)
+                  END IF
+                  CALL accint_weight_force(qs_env, rho_struct, rho1, 0, xc_section, force_scale=vscale)
                END IF
             END IF
          END IF
@@ -739,7 +951,6 @@ CONTAINS
             virial%pv_ehartree = virial%pv_ehartree + (virial%pv_virial - pv_loc)
          END IF
          IF (dft_control%qs_control%do_kg) THEN
-            CPASSERT(.NOT. (gapw .OR. gapw_xc))
             CPASSERT(nimages == 1)
             ksmat => ks_matrix(:, 1)
 
@@ -771,7 +982,6 @@ CONTAINS
             END IF
          END IF
       END IF ! .NOT. just energy
-
       IF (dft_control%qs_control%ddapc_explicit_potential) THEN
          CALL auxbas_pw_pool%give_back_pw(v_spin_ddapc_rest_r)
          DEALLOCATE (v_spin_ddapc_rest_r)
@@ -949,6 +1159,8 @@ CONTAINS
                      energy%sccs_pol + energy%cdft + energy%exc1_aux_fit
 
       IF (dft_control%apply_embed_pot) energy%total = energy%total + energy%embed_corr
+
+      IF (native_skala_restore_exc) energy%total = native_skala_total_scf
 
       IF (abnormal_value(energy%total)) &
          CPABORT("KS energy is an abnormal value (NaN/Inf).")

@@ -19,7 +19,8 @@ MODULE input_cp2k_motion
                            Ceriotti2014, &
                            Henkelman1999, &
                            Henkelman2014, &
-                           Kapil2016
+                           Kapil2016, &
+                           Lindh1995
    USE cp_output_handling, ONLY: add_last_numeric, &
                                  cp_print_key_section_create, &
                                  debug_print_level, &
@@ -28,18 +29,19 @@ MODULE input_cp2k_motion
                                  medium_print_level
    USE cp_units, ONLY: cp_unit_to_cp2k
    USE input_constants, ONLY: &
-      default_bfgs_method_id, default_cell_direct_id, default_cell_geo_opt_id, &
-      default_cell_md_id, default_cg_method_id, default_dimer_method_id, &
+      debug_lbfgs, default_bfgs_method_id, default_cg_method_id, default_dimer_method_id, &
       default_lbfgs_method_id, default_minimization_method_id, default_ts_method_id, &
+      dimer_init_molden, dimer_init_random, &
       do_mc_gemc_npt, do_mc_gemc_nvt, do_mc_traditional, do_mc_virial, fix_none, fix_x, fix_xy, &
       fix_xz, fix_y, fix_yz, fix_z, fmt_id_pdb, fmt_id_xyz, gaussian, helium_cell_shape_cube, &
       helium_cell_shape_octahedron, helium_forces_average, helium_forces_last, &
       helium_mdist_exponential, helium_mdist_gaussian, helium_mdist_linear, &
       helium_mdist_quadratic, helium_mdist_singlev, helium_mdist_uniform, &
       helium_sampling_ceperley, helium_sampling_worm, helium_solute_intpot_mwater, helium_solute_intpot_nnp, &
-      helium_solute_intpot_none, integrate_exact, integrate_numeric, ls_2pnt, ls_3pnt, ls_fit, &
-      ls_gold, ls_none, matrix_init_cholesky, matrix_init_diagonal, numerical, perm_cycle, &
-      perm_plain, propagator_pimd, propagator_rpmd, propagator_cmd, transformation_normal, transformation_stage
+      helium_solute_intpot_none, high_lbfgs, integrate_exact, integrate_numeric, low_lbfgs, ls_2pnt, ls_3pnt, ls_fit, &
+      ls_gold, ls_none, matrix_init_cholesky, matrix_init_diagonal, medium_lbfgs, numerical, perm_cycle, &
+      perm_plain, propagator_pimd, propagator_rpmd, propagator_cmd, propagator_bcmd, silent_lbfgs, &
+      transformation_normal, transformation_stage
    USE input_cp2k_constraints, ONLY: create_constraint_section
    USE input_cp2k_free_energy, ONLY: create_fe_section
    USE input_cp2k_md, ONLY: create_md_section
@@ -60,11 +62,13 @@ MODULE input_cp2k_motion
                                   section_release, &
                                   section_type
    USE input_val_types, ONLY: integer_t, &
+                              lchar_t, &
                               logical_t, &
                               real_t, &
                               char_t
    USE kinds, ONLY: dp
-   USE string_utilities, ONLY: s2a
+   USE string_utilities, ONLY: newline, &
+                               s2a
 #include "../base/base_uses.f90"
 
    IMPLICIT NONE
@@ -1013,27 +1017,24 @@ CONTAINS
       TYPE(section_type), POINTER                        :: print_key, subsection
 
       CALL create_geoopt_section(section, __LOCATION__, label="CELL_OPT", &
-                                 description="This section sets the environment for the optimization of the simulation cell."// &
-                                 " Two possible schemes are available: (1) Zero temperature optimization;"// &
-                                 " (2) Finite temperature optimization.", &
-                                 just_optimizers=.TRUE., &
-                                 use_model_hessian=.FALSE.)
+                                 description="This section sets the environment for the optimization "// &
+                                 "of the simulation cell. As is noted in FORCE_EVAL/SUBSYS/CELL, the "// &
+                                 "program convention is that the first cell vector A lies along the "// &
+                                 "X-axis and the second cell vector B is in the XY plane, such that "// &
+                                 "the cell vector matrix is a lower triangle. There is no complete, "// &
+                                 "official algorithm support and/or tests for updating the three "// &
+                                 "upper triangular components during a cell optimization; please "// &
+                                 "prepare input accordingly with these three components precisely 0 "// &
+                                 "even for cases like the primitive rhombohedral cell of the FCC lattice.", &
+                                 just_optimizers=.TRUE., use_model_hessian=.FALSE.)
 
       NULLIFY (keyword, print_key, subsection)
       CALL keyword_create( &
-         keyword, __LOCATION__, name="TYPE", &
-         description="Specify which kind of method to use for the optimization of the simulation cell", &
-         usage="TYPE (GEO_OPT|MD|DIRECT_CELL_OPT)", &
-         enum_c_vals=s2a("GEO_OPT", "MD", "DIRECT_CELL_OPT"), &
-         enum_desc=s2a( &
-         "Performs a geometry optimization (the GEO_OPT section must be defined) between cell optimization steps."// &
-         " The stress tensor is computed at the optimized geometry.", &
-         "Performs a molecular dynamics run (the MD section needs must defined) for computing the stress tensor"// &
-         " used for the cell optimization.", &
-         "Performs a geometry and cell optimization at the same time."// &
-         " The stress tensor is computed at every step"), &
-         enum_i_vals=[default_cell_geo_opt_id, default_cell_md_id, default_cell_direct_id], &
-         default_i_val=default_cell_direct_id)
+         keyword, __LOCATION__, name="TYPE", removed=.TRUE., description="", &
+         deprecation_notice="The keyword MOTION/CELL_OPT/TYPE has been removed because "// &
+         "cell optimizations now always use DIRECT_CELL_OPT.", &
+         enum_c_vals=s2a("DIRECT_CELL_OPT", "GEO_OPT", "MD"), &
+         enum_i_vals=[1, 2, 3], default_i_val=1)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -1048,19 +1049,34 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
-      CALL keyword_create( &
-         keyword, __LOCATION__, name="KEEP_ANGLES", &
-         description="Keep angles between the cell vectors constant, but allow the lengths of the"// &
-         " cell vectors to change independently."// &
-         " Albeit general, this is most useful for triclinic cells, to enforce higher symmetry, see KEEP_SYMMETRY.", &
-         usage="KEEP_ANGLES TRUE", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL keyword_create(keyword, __LOCATION__, name="KEEP_VOLUME", &
+                          description="Keep the volume of the cell constant during cell optimization. "// &
+                          "This is implemented by comparing the cell volumes and scaling the new "// &
+                          "cell vectors just before updating the cell information, and can be "// &
+                          "used together with KEEP_ANGLES or KEEP_SYMMETRY.", &
+                          usage="KEEP_VOLUME TRUE", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="KEEP_ANGLES", &
+                          description="Keep angles between the cell vectors constant, but "// &
+                          "allow the lengths of the cell vectors to change independently "// &
+                          "during cell optimization. This is implemented by projecting out "// &
+                          "the components of angles in the cell gradient before the cell "// &
+                          "is updated. Albeit general, this is most useful for triclinic "// &
+                          "cells; to enforce higher symmetry, see KEEP_SYMMETRY.", &
+                          usage="KEEP_ANGLES TRUE", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="KEEP_SYMMETRY", &
-                          description="Keep the requested initial cell symmetry (e.g. during a cell optimisation). "// &
-                          "The initial symmetry must be specified in the &CELL section.", &
-                          usage="KEEP_SYMMETRY yes", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
+                          description="Keep the requested initial cell symmetry as specified "// &
+                          "in the FORCE_EVAL/SUBSYS/CELL section during cell optimization. "// &
+                          "This is implemented by removing symmetry-breaking components and "// &
+                          "taking averages of components if necessary in the cell gradient "// &
+                          "before the cell is updated. To enforce the space group (which "// &
+                          "requires spglib package), see KEEP_SPACE_GROUP.", &
+                          usage="KEEP_SYMMETRY TRUE", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -1152,6 +1168,52 @@ CONTAINS
       CALL section_add_keyword(subsection, keyword)
       CALL keyword_release(keyword)
 
+      CALL keyword_create(keyword, __LOCATION__, name="INITIALIZATION_METHOD", &
+                          description="Specify the initialization method of the dimer vector, "// &
+                          "which is crucial for converging to the desired transition state. "// &
+                          "If the DIMER_VECTOR section is defined explicitly, it will always "// &
+                          "be parsed directly (e.g. in restart files); INITIALIZATION_METHOD "// &
+                          "is only effective if the DIMER_VECTOR section is not explicit.", &
+                          usage="INITIALIZATION_METHOD (RANDOM|MOLDEN)", &
+                          enum_desc=s2a("Generate the initial dimer vector randomly. This is "// &
+                                        "the default for backwards compatibility; in practice "// &
+                                        "it may distort the structure and slow down convergence.", &
+                                        "Generate the initial dimer vector from one or more "// &
+                                        "vibrational normal modes as read from a MOLDEN file "// &
+                                        "produced by `VIBRATIONAL_ANALYSIS%PRINT%MOLDEN_VIB` "// &
+                                        "in a vibrational analysis task. Requires setting up "// &
+                                        "keywords `VIB_MOLDEN_NAME`, `VIB_INDEX` and `VIB_WEIGHT`."), &
+                          enum_c_vals=s2a("RANDOM", "MOLDEN"), &
+                          enum_i_vals=[dimer_init_random, dimer_init_molden], &
+                          default_i_val=dimer_init_random)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="VIB_MOLDEN_NAME", &
+                          description="The external molden file containing vibrational "// &
+                          "normal modes for `INITIALIZATION_METHOD MOLDEN`.", &
+                          usage="VIB_MOLDEN_NAME <CHARACTER>", type_of_var=lchar_t)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="VIB_INDEX", &
+                          description="The index of one or more vibrational normal modes "// &
+                          "from the file whose linear combination will form the initial "// &
+                          "dimer vector.", &
+                          usage="VIB_INDEX {integer} {integer} .. {integer}", repeats=.TRUE., &
+                          n_var=-1, default_i_vals=[1], type_of_var=integer_t)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="VIB_WEIGHT", &
+                          description="The weight of one or more vibrational normal modes "// &
+                          "from the file whose linear combination will form the initial "// &
+                          "dimer vector.", &
+                          usage="VIB_WEIGHT {real} {real} .. {real}", repeats=.TRUE., &
+                          n_var=-1, default_r_vals=[1.0_dp], type_of_var=real_t)
+      CALL section_add_keyword(subsection, keyword)
+      CALL keyword_release(keyword)
+
       CALL keyword_create(keyword, __LOCATION__, name="INTERPOLATE_GRADIENT", &
                           description="This keyword controls the interpolation of the gradient whenever possible"// &
                           " during the optimization of the Dimer. The use of this keywords saves 1 evaluation"// &
@@ -1221,8 +1283,9 @@ CONTAINS
       CALL section_release(subsection2)
 
       CALL section_create(subsection2, __LOCATION__, name="DIMER_VECTOR", &
-                          description="Specifies the initial dimer vector (used frequently to restart DIMER calculations)."// &
-                          " If not provided the starting orientation of the dimer is chosen randomly.", &
+                          description="Specifies the initial dimer vector. This "// &
+                          "section overrides INITIALIZATION_METHOD, and will be "// &
+                          "updated on each step for producing the restart files.", &
                           n_keywords=0, n_subsections=1, repeats=.FALSE.)
       CALL keyword_create(keyword, __LOCATION__, name="_DEFAULT_KEYWORD_", &
                           description="Specify on each line the components of the dimer vector.", repeats=.TRUE., &
@@ -1269,6 +1332,7 @@ CONTAINS
                           description="Uses a model Hessian as initial guess instead of a unit matrix."// &
                           " Should lead in general to improved convergence might be switched off for exotic cases", &
                           usage="USE_MODEL_HESSIAN", &
+                          citations=[Lindh1995], &
                           default_l_val=use_model_hessian, lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -1468,6 +1532,22 @@ CONTAINS
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
+      CALL keyword_create(keyword, __LOCATION__, name="PRINT_LEVEL", &
+                          description="How much output is written out by the LBFGS algorithm. "// &
+                          "Currently this is independent of the &GLOBAL/PRINT_LEVEL setting.", &
+                          usage="PRINT_LEVEL MEDIUM", &
+                          enum_c_vals=s2a("SILENT", "LOW", "MEDIUM", "HIGH", "DEBUG"), &
+                          enum_desc=s2a("Almost no output", &
+                                        "Little output about f and |proj g| every iteration", &
+                                        "Quite some output about details every iteration", &
+                                        "Lots of output about changes of active set and final x", &
+                                        "Everything is written out, useful for debugging purposes only"), &
+                          enum_i_vals=[silent_lbfgs, low_lbfgs, medium_lbfgs, &
+                                       high_lbfgs, debug_lbfgs], &
+                          default_i_val=low_print_level)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
       CALL keyword_create(keyword, __LOCATION__, name="WANTED_PROJ_GRADIENT", &
                           description="Convergence criterion (overrides the general ones):"// &
                           " Requested norm threshold of the gradient multiplied"// &
@@ -1491,6 +1571,14 @@ CONTAINS
          description="Trust radius used in LBFGS. Not completely in depth tested. Negativ values means no trust radius is used.", &
          usage="TRUST_RADIUS {real}", unit_str='angstrom', &
          default_r_val=-1.0_dp)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="__CONTROL_VAL", &
+                          description="Hidden parameter that controls the printing behavior "// &
+                          "of the LBFGS optimizer for advanced debug purposes. This option "// &
+                          "overrides PRINT_LEVEL setting if explicit.", &
+                          default_i_val=-1)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -1731,10 +1819,10 @@ CONTAINS
       CALL keyword_release(keyword)
       CALL keyword_create(keyword, __LOCATION__, name="propagator", &
                           description="Specifies the real time propagator to use", &
-                          usage="PROPAGATOR (PIMD|RPMD|CMD)", &
+                          usage="PROPAGATOR (PIMD|RPMD|CMD|BCMD)", &
                           default_i_val=propagator_pimd, &
-                          enum_c_vals=s2a("PIMD", "RPMD", "CMD"), &
-                          enum_i_vals=[propagator_pimd, propagator_rpmd, propagator_cmd])
+                          enum_c_vals=s2a("PIMD", "RPMD", "CMD", "BCMD"), &
+                          enum_i_vals=[propagator_pimd, propagator_rpmd, propagator_cmd, propagator_bcmd])
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
       CALL keyword_create(keyword, __LOCATION__, name="FIX_CENTROID_POS", &

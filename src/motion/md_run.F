@@ -19,6 +19,7 @@ MODULE md_run
    USE cell_types,                      ONLY: cell_type
    USE cp_external_control,             ONLY: external_control
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
+                                              cp_logger_get_default_io_unit,&
                                               cp_logger_type
    USE cp_output_handling,              ONLY: cp_add_iter_level,&
                                               cp_iterate,&
@@ -37,6 +38,7 @@ MODULE md_run
    USE free_energy_types,               ONLY: fe_env_create,&
                                               free_energy_type
    USE global_types,                    ONLY: global_environment_type
+   USE hfx_ace_methods,                 ONLY: hfx_ace_set_dynamic_mode
    USE input_constants,                 ONLY: &
         ehrenfest, langevin_ensemble, npe_f_ensemble, npe_i_ensemble, &
         nph_uniaxial_damped_ensemble, nph_uniaxial_ensemble, npt_f_ensemble, npt_i_ensemble, &
@@ -48,7 +50,8 @@ MODULE md_run
                                               section_vals_val_get
    USE kinds,                           ONLY: default_string_length,&
                                               dp
-   USE machine,                         ONLY: m_walltime
+   USE machine,                         ONLY: m_flush,&
+                                              m_walltime
    USE md_ener_types,                   ONLY: create_md_ener,&
                                               md_ener_type
    USE md_energies,                     ONLY: initialize_md_ener,&
@@ -135,6 +138,12 @@ CONTAINS
       my_rm_restart_info = .TRUE.
       IF (PRESENT(rm_restart_info)) my_rm_restart_info = rm_restart_info
       NULLIFY (md_env, para_env)
+
+      ! Tell ACE that this is a dynamic run: Bypass C will use full HFX
+      ! for the entire first MD step so wavefunction propagation delivers
+      ! a near-converged C_occ to step 1, making the ACE BUILD accurate.
+      CALL hfx_ace_set_dynamic_mode(.TRUE.)
+
       para_env => force_env%para_env
       motion_section => section_vals_get_subs_vals(force_env%root_section, "MOTION")
       md_section => section_vals_get_subs_vals(motion_section, "MD")
@@ -182,8 +191,10 @@ CONTAINS
 
       CHARACTER(LEN=*), PARAMETER                        :: routineN = 'qs_mol_dyn_low'
 
+      CHARACTER(LEN=80)                                  :: md_step_line
       CHARACTER(LEN=default_string_length)               :: my_act, my_pos
-      INTEGER                                            :: handle, i, istep, md_stride, run_type_id
+      INTEGER                                            :: handle, i, istep, md_stride, &
+                                                            output_unit, run_type_id
       INTEGER, POINTER                                   :: itimes
       LOGICAL                                            :: check, ehrenfest_md, save_mem, &
                                                             should_stop, write_binary_restart_file
@@ -218,6 +229,7 @@ CONTAINS
                constraint_section, thermal_regions, virial, subsys_i)
       logger => cp_get_default_logger()
       para_env => force_env%para_env
+      output_unit = cp_logger_get_default_io_unit(logger)
 
       global_section => section_vals_get_subs_vals(force_env%root_section, "GLOBAL")
       free_energy_section => section_vals_get_subs_vals(motion_section, "FREE_ENERGY")
@@ -449,6 +461,14 @@ CONTAINS
 
       ! Real MD Loop
       DO istep = 1, simpar%nsteps, md_stride
+         IF (output_unit > 0) THEN
+            WRITE (md_step_line, FMT="(A,I12,A,I0)") "MD STEP: ", istep, " / ", simpar%nsteps
+
+            WRITE (UNIT=output_unit, FMT="(/,T2,A)") REPEAT("-", LEN_TRIM(md_step_line))
+            WRITE (UNIT=output_unit, FMT="(T2,A)") TRIM(md_step_line)
+            WRITE (UNIT=output_unit, FMT="(T2,A)") REPEAT("-", LEN_TRIM(md_step_line))
+            CALL m_flush(output_unit)
+         END IF
          ! Increase counters
          itimes = itimes + 1
          time = time + simpar%dt

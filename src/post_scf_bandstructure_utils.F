@@ -57,6 +57,7 @@ MODULE post_scf_bandstructure_utils
    USE cp_parser_methods,               ONLY: read_float_object
    USE input_constants,                 ONLY: int_ldos_z,&
                                               large_cell_Gamma,&
+                                              large_cell_Gamma_ri_rs,&
                                               small_cell_full_kp
    USE input_section_types,             ONLY: section_vals_get,&
                                               section_vals_get_subs_vals,&
@@ -104,6 +105,7 @@ MODULE post_scf_bandstructure_utils
                                               cfm_add_on_diag,&
                                               create_cfm_double,&
                                               get_cfm_submat
+   USE string_utilities,                ONLY: uppercase
 #include "base/base_uses.f90"
 
    IMPLICIT NONE
@@ -111,9 +113,9 @@ MODULE post_scf_bandstructure_utils
    PRIVATE
 
    PUBLIC :: create_and_init_bs_env, &
-             dos_pdos_ldos, cfm_ikp_from_fm_Gamma, MIC_contribution_from_ikp, &
-             compute_xkp, kpoint_init_cell_index_simple, rsmat_to_kp, soc, &
-             get_VBM_CBM_bandgaps, get_all_VBM_CBM_bandgaps
+             eval_bandstructure_properties, cfm_ikp_from_fm_Gamma, &
+             MIC_contribution_from_ikp, compute_xkp, kpoint_init_cell_index_simple, &
+             rsmat_to_kp, soc, get_VBM_CBM_bandgaps, get_all_VBM_CBM_bandgaps
 
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'post_scf_bandstructure_utils'
 
@@ -140,14 +142,14 @@ CONTAINS
 
       CALL print_header(bs_env)
 
-      CALL read_bandstructure_input_parameters(bs_env, post_scf_bandstructure_section)
+      CALL read_bandstructure_input_parameters(bs_env, post_scf_bandstructure_section, qs_env)
 
       CALL get_parameters_from_qs_env(qs_env, bs_env)
 
       CALL set_heuristic_parameters(bs_env)
 
       SELECT CASE (bs_env%small_cell_full_kp_or_large_cell_Gamma)
-      CASE (large_cell_Gamma)
+      CASE (large_cell_Gamma, large_cell_Gamma_ri_rs)
 
          CALL setup_kpoints_DOS_large_cell_Gamma(qs_env, bs_env, bs_env%kpoints_DOS)
 
@@ -178,30 +180,53 @@ CONTAINS
 !> \brief ...
 !> \param bs_env ...
 !> \param bs_sec ...
+!> \param qs_env ...
 ! **************************************************************************************************
-   SUBROUTINE read_bandstructure_input_parameters(bs_env, bs_sec)
+   SUBROUTINE read_bandstructure_input_parameters(bs_env, bs_sec, qs_env)
       TYPE(post_scf_bandstructure_type), POINTER         :: bs_env
       TYPE(section_vals_type), POINTER                   :: bs_sec
+      TYPE(qs_environment_type), POINTER                 :: qs_env
 
       CHARACTER(LEN=*), PARAMETER :: routineN = 'read_bandstructure_input_parameters'
 
+      CHARACTER(LEN=default_string_length)               :: ustr
       CHARACTER(LEN=default_string_length), &
          DIMENSION(:), POINTER                           :: string_ptr
       CHARACTER(LEN=max_line_length)                     :: error_msg
       INTEGER                                            :: handle, i, ikp
-      TYPE(section_vals_type), POINTER                   :: gw_sec, kp_bs_sec, ldos_sec, soc_sec
+      REAL(KIND=dp), DIMENSION(3)                        :: kpptr
+      REAL(KIND=dp), DIMENSION(3, 3)                     :: cart_hmat
+      TYPE(cell_type), POINTER                           :: cell
+      TYPE(section_vals_type), POINTER                   :: dos_pdos_sec, floquet_sec, gw_ri_rs_sec, &
+                                                            gw_sec, kp_bs_sec, ldos_sec, soc_sec
 
       CALL timeset(routineN, handle)
+      NULLIFY (cell)
+      CALL get_qs_env(qs_env=qs_env, cell=cell)
+      cart_hmat(:, :) = cell%hmat(:, :)
+      IF (cell%input_cell_canonicalized) cart_hmat(:, :) = cell%input_hmat(:, :)
 
       NULLIFY (gw_sec)
       gw_sec => section_vals_get_subs_vals(bs_sec, "GW")
       CALL section_vals_get(gw_sec, explicit=bs_env%do_gw)
+
+      NULLIFY (gw_ri_rs_sec)
+      gw_ri_rs_sec => section_vals_get_subs_vals(bs_sec, "GW_RI_RS")
+      CALL section_vals_get(gw_ri_rs_sec, explicit=bs_env%do_gw_ri_rs)
+      CALL section_vals_val_get(gw_ri_rs_sec, "TIKHONOV", r_val=bs_env%ri_rs%tikhonov)
+      CALL section_vals_val_get(gw_ri_rs_sec, "GRID_SELECT", i_val=bs_env%ri_rs%grid_select)
+      CALL section_vals_val_get(gw_ri_rs_sec, "CHUNK_SIZE_DBCSR", i_val=bs_env%ri_rs%chunk_size_dbcsr)
+      CALL section_vals_val_get(gw_ri_rs_sec, "CUTOFF_RADIUS_RI_RS", r_val=bs_env%ri_rs%cutoff_radius_ri_rs)
 
       NULLIFY (soc_sec)
       soc_sec => section_vals_get_subs_vals(bs_sec, "SOC")
       CALL section_vals_get(soc_sec, explicit=bs_env%do_soc)
 
       CALL section_vals_val_get(soc_sec, "ENERGY_WINDOW", r_val=bs_env%energy_window_soc)
+
+      NULLIFY (dos_pdos_sec)
+      dos_pdos_sec => section_vals_get_subs_vals(bs_sec, "DOS")
+      CALL section_vals_get(dos_pdos_sec, explicit=bs_env%do_dos_pdos)
 
       CALL section_vals_val_get(bs_sec, "DOS%KPOINTS", i_vals=bs_env%nkp_grid_DOS_input)
       CALL section_vals_val_get(bs_sec, "DOS%ENERGY_WINDOW", r_val=bs_env%energy_window_DOS)
@@ -218,7 +243,24 @@ CONTAINS
       NULLIFY (kp_bs_sec)
       kp_bs_sec => section_vals_get_subs_vals(bs_sec, "BANDSTRUCTURE_PATH")
       CALL section_vals_val_get(kp_bs_sec, "NPOINTS", i_val=bs_env%input_kp_bs_npoints)
+      CALL section_vals_val_get(kp_bs_sec, "UNITS", c_val=ustr)
+      CALL uppercase(ustr)
       CALL section_vals_val_get(kp_bs_sec, "SPECIAL_POINT", n_rep_val=bs_env%input_kp_bs_n_sp_pts)
+
+      NULLIFY (floquet_sec)
+      floquet_sec => section_vals_get_subs_vals(bs_sec, "FLOQUET")
+      CALL section_vals_get(floquet_sec, explicit=bs_env%do_floquet)
+      CALL section_vals_val_get(floquet_sec, "AMPLITUDE", r_val=bs_env%floquet_amplitude)
+      CALL section_vals_val_get(floquet_sec, "FREQUENCY", r_val=bs_env%floquet_omega)
+      CALL section_vals_val_get(floquet_sec, "POLARISATION", r_vals=bs_env%floquet_polarisation)
+      CALL section_vals_val_get(floquet_sec, "PHASE_OFFSETS", r_vals=bs_env%floquet_phi)
+      CALL section_vals_val_get(floquet_sec, "MAX_FLOQUET_INDEX", i_val=bs_env%max_floquet_index)
+      CALL section_vals_val_get(floquet_sec, "EPS_FLOQUET", r_val=bs_env%eps_floquet)
+      CALL section_vals_val_get(floquet_sec, "ENERGY_WINDOW", r_val=bs_env%energy_window_floquet)
+      CALL section_vals_val_get(floquet_sec, "ENERGY_STEP", r_val=bs_env%energy_step_floquet)
+      CALL section_vals_val_get(floquet_sec, "BROADENING", r_val=bs_env%broadening_floquet)
+      CALL section_vals_val_get(floquet_sec, "FLOQUET_DOS_FILE_NAME", c_val=bs_env%floquet_dos_file)
+      CALL section_vals_val_get(floquet_sec, "QUASI_ENERGIES_FILE_NAME", c_val=bs_env%floquet_qe_file)
 
       ! read special points for band structure
       ALLOCATE (bs_env%xkp_special(3, bs_env%input_kp_bs_n_sp_pts))
@@ -226,9 +268,23 @@ CONTAINS
          CALL section_vals_val_get(kp_bs_sec, "SPECIAL_POINT", i_rep_val=ikp, c_vals=string_ptr)
          CPASSERT(SIZE(string_ptr(:), 1) == 4)
          DO i = 1, 3
-            CALL read_float_object(string_ptr(i + 1), bs_env%xkp_special(i, ikp), error_msg)
+            CALL read_float_object(string_ptr(i + 1), kpptr(i), error_msg)
             IF (LEN_TRIM(error_msg) > 0) CPABORT(TRIM(error_msg))
          END DO
+         SELECT CASE (ustr)
+         CASE ("B_VECTOR")
+            bs_env%xkp_special(1:3, ikp) = kpptr(1:3)
+         CASE ("CART_ANGSTROM")
+            bs_env%xkp_special(1:3, ikp) = (kpptr(1)*cart_hmat(1, 1:3) + &
+                                            kpptr(2)*cart_hmat(2, 1:3) + &
+                                            kpptr(3)*cart_hmat(3, 1:3))/twopi*angstrom
+         CASE ("CART_BOHR")
+            bs_env%xkp_special(1:3, ikp) = (kpptr(1)*cart_hmat(1, 1:3) + &
+                                            kpptr(2)*cart_hmat(2, 1:3) + &
+                                            kpptr(3)*cart_hmat(3, 1:3))/twopi
+         CASE DEFAULT
+            CPABORT("Unknown unit <"//TRIM(ustr)//"> specified for k-point definition")
+         END SELECT
       END DO
 
       CALL timestop(handle)
@@ -870,9 +926,21 @@ CONTAINS
       bs_env%hmat(1:3, 1:3) = hmat
       bs_env%nimages_scf = dft_control%nimages
       IF (dft_control%nimages == 1) THEN
-         bs_env%small_cell_full_kp_or_large_cell_Gamma = large_cell_Gamma
+         IF (bs_env%do_gw_ri_rs) THEN
+            IF (ANY(periodic /= 0)) THEN
+               CPABORT("RI-RS Not Implemented for Periodic Calculations")
+            ELSE
+               bs_env%small_cell_full_kp_or_large_cell_Gamma = large_cell_Gamma_ri_rs
+            END IF
+         ELSE
+            bs_env%small_cell_full_kp_or_large_cell_Gamma = large_cell_Gamma
+         END IF
       ELSE IF (dft_control%nimages > 1) THEN
-         bs_env%small_cell_full_kp_or_large_cell_Gamma = small_cell_full_kp
+         IF (bs_env%do_gw_ri_rs) THEN
+            CPABORT("RI-RS Not Implemented for K-point Calculations")
+         ELSE
+            bs_env%small_cell_full_kp_or_large_cell_Gamma = small_cell_full_kp
+         END IF
       ELSE
          CPABORT("Wrong number of cells from DFT calculation.")
       END IF
@@ -981,11 +1049,11 @@ CONTAINS
 !> \param qs_env ...
 !> \param bs_env ...
 ! **************************************************************************************************
-   SUBROUTINE dos_pdos_ldos(qs_env, bs_env)
+   SUBROUTINE eval_bandstructure_properties(qs_env, bs_env)
       TYPE(qs_environment_type), POINTER                 :: qs_env
       TYPE(post_scf_bandstructure_type), POINTER         :: bs_env
 
-      CHARACTER(LEN=*), PARAMETER                        :: routineN = 'dos_pdos_ldos'
+      CHARACTER(LEN=*), PARAMETER :: routineN = 'eval_bandstructure_properties'
 
       INTEGER                                            :: handle, homo, homo_1, homo_2, &
                                                             homo_spinor, ikp, ikp_for_file, ispin, &
@@ -1058,17 +1126,7 @@ CONTAINS
 
       n_E = INT(E_total_window/energy_step_DOS)
 
-      ALLOCATE (DOS_scf(n_E))
-      DOS_scf(:) = 0.0_dp
-      ALLOCATE (DOS_scf_SOC(n_E))
-      DOS_scf_SOC(:) = 0.0_dp
-
       CALL get_qs_env(qs_env, nkind=nkind)
-
-      ALLOCATE (PDOS_scf(n_E, nkind))
-      PDOS_scf(:, :) = 0.0_dp
-      ALLOCATE (PDOS_scf_SOC(n_E, nkind))
-      PDOS_scf_SOC(:, :) = 0.0_dp
 
       ALLOCATE (proj_mo_on_kind(n_ao, nkind))
       proj_mo_on_kind(:, :) = 0.0_dp
@@ -1078,18 +1136,38 @@ CONTAINS
       ALLOCATE (eigenval_spinor_no_SOC(2*n_ao))
       ALLOCATE (eigenval_spinor_G0W0(2*n_ao))
 
-      IF (bs_env%do_gw) THEN
+      IF (bs_env%do_dos_pdos) THEN
 
-         ALLOCATE (DOS_G0W0(n_E))
-         DOS_G0W0(:) = 0.0_dp
-         ALLOCATE (DOS_G0W0_SOC(n_E))
-         DOS_G0W0_SOC(:) = 0.0_dp
+         ALLOCATE (DOS_scf(n_E))
+         DOS_scf(:) = 0.0_dp
+         ALLOCATE (PDOS_scf(n_E, nkind))
+         PDOS_scf(:, :) = 0.0_dp
 
-         ALLOCATE (PDOS_G0W0(n_E, nkind))
-         PDOS_G0W0(:, :) = 0.0_dp
-         ALLOCATE (PDOS_G0W0_SOC(n_E, nkind))
-         PDOS_G0W0_SOC(:, :) = 0.0_dp
+         IF (bs_env%do_soc) THEN
 
+            ALLOCATE (DOS_scf_SOC(n_E))
+            DOS_scf_SOC(:) = 0.0_dp
+            ALLOCATE (PDOS_scf_SOC(n_E, nkind))
+            PDOS_scf_SOC(:, :) = 0.0_dp
+
+         END IF
+
+         IF (bs_env%do_gw) THEN
+
+            ALLOCATE (DOS_G0W0(n_E))
+            DOS_G0W0(:) = 0.0_dp
+            ALLOCATE (PDOS_G0W0(n_E, nkind))
+            PDOS_G0W0(:, :) = 0.0_dp
+
+            IF (bs_env%do_soc) THEN
+
+               ALLOCATE (DOS_G0W0_SOC(n_E))
+               DOS_G0W0_SOC(:) = 0.0_dp
+               ALLOCATE (PDOS_G0W0_SOC(n_E, nkind))
+               PDOS_G0W0_SOC(:, :) = 0.0_dp
+
+            END IF
+         END IF
       END IF
 
       CALL cp_cfm_create(cfm_mos_ikp(1), bs_env%fm_ks_Gamma(1)%matrix_struct)
@@ -1147,7 +1225,7 @@ CONTAINS
          DO ispin = 1, bs_env%n_spin
 
             SELECT CASE (bs_env%small_cell_full_kp_or_large_cell_Gamma)
-            CASE (large_cell_Gamma)
+            CASE (large_cell_Gamma, large_cell_Gamma_ri_rs)
 
                ! 1. get H^KS_µν(k_i) from H^KS_µν(k=0)
                CALL cfm_ikp_from_fm_Gamma(cfm_ks_ikp, bs_env%fm_ks_Gamma(ispin), &
@@ -1181,11 +1259,14 @@ CONTAINS
             CALL compute_proj_mo_on_kind(proj_mo_on_kind, qs_env, cfm_mos_ikp(ispin), cfm_s_ikp)
 
             ! 5. DOS and PDOS
-            CALL add_to_DOS_PDOS(DOS_scf, PDOS_scf, eigenval, ikp, bs_env, n_E, E_min, &
-                                 proj_mo_on_kind)
-            IF (bs_env%do_gw) THEN
-               CALL add_to_DOS_PDOS(DOS_G0W0, PDOS_G0W0, bs_env%eigenval_G0W0(:, ikp, ispin), &
-                                    ikp, bs_env, n_E, E_min, proj_mo_on_kind)
+            IF (bs_env%do_dos_pdos) THEN
+               CALL add_to_DOS_PDOS(DOS_scf, PDOS_scf, eigenval, ikp, bs_env, n_E, E_min, &
+                                    proj_mo_on_kind)
+
+               IF (bs_env%do_gw) THEN
+                  CALL add_to_DOS_PDOS(DOS_G0W0, PDOS_G0W0, bs_env%eigenval_G0W0(:, ikp, ispin), &
+                                       ikp, bs_env, n_E, E_min, proj_mo_on_kind)
+               END IF
             END IF
 
             IF (bs_env%do_ldos) THEN
@@ -1273,15 +1354,19 @@ CONTAINS
       END IF
 
       CALL write_band_edges(band_edges_scf, "SCF", bs_env)
-      CALL write_dos_pdos(DOS_scf, PDOS_scf, bs_env, qs_env, "SCF", E_min, band_edges_scf%VBM)
+      IF (bs_env%do_dos_pdos) THEN
+         CALL write_dos_pdos(DOS_scf, PDOS_scf, bs_env, qs_env, "SCF", E_min, band_edges_scf%VBM)
+      END IF
       IF (bs_env%do_ldos) THEN
          CALL print_LDOS_main(LDOS_scf_2d, bs_env, band_edges_scf, "SCF")
       END IF
 
       IF (bs_env%do_soc) THEN
          CALL write_band_edges(band_edges_scf_SOC, "SCF+SOC", bs_env)
-         CALL write_dos_pdos(DOS_scf_SOC, PDOS_scf_SOC, bs_env, qs_env, "SCF_SOC", &
-                             E_min, band_edges_scf_SOC%VBM)
+         IF (bs_env%do_dos_pdos) THEN
+            CALL write_dos_pdos(DOS_scf_SOC, PDOS_scf_SOC, bs_env, qs_env, "SCF_SOC", &
+                                E_min, band_edges_scf_SOC%VBM)
+         END IF
          IF (bs_env%do_ldos) THEN
             ! argument band_edges_scf is actually correct because the non-SOC band edges
             ! have been used as reference in add_to_LDOS_2d
@@ -1293,8 +1378,10 @@ CONTAINS
       IF (bs_env%do_gw) THEN
          CALL write_band_edges(band_edges_G0W0, "G0W0", bs_env)
          CALL write_band_edges(bs_env%band_edges_HF, "Hartree-Fock with SCF orbitals", bs_env)
-         CALL write_dos_pdos(DOS_G0W0, PDOS_G0W0, bs_env, qs_env, "G0W0", E_min, &
-                             band_edges_G0W0%VBM)
+         IF (bs_env%do_dos_pdos) THEN
+            CALL write_dos_pdos(DOS_G0W0, PDOS_G0W0, bs_env, qs_env, "G0W0", E_min, &
+                                band_edges_G0W0%VBM)
+         END IF
          IF (bs_env%do_ldos) THEN
             CALL print_LDOS_main(LDOS_G0W0_2d, bs_env, band_edges_G0W0, "G0W0")
          END IF
@@ -1302,8 +1389,10 @@ CONTAINS
 
       IF (bs_env%do_soc .AND. bs_env%do_gw) THEN
          CALL write_band_edges(band_edges_G0W0_SOC, "G0W0+SOC", bs_env)
-         CALL write_dos_pdos(DOS_G0W0_SOC, PDOS_G0W0_SOC, bs_env, qs_env, "G0W0_SOC", E_min, &
-                             band_edges_G0W0_SOC%VBM)
+         IF (bs_env%do_dos_pdos) THEN
+            CALL write_dos_pdos(DOS_G0W0_SOC, PDOS_G0W0_SOC, bs_env, qs_env, "G0W0_SOC", E_min, &
+                                band_edges_G0W0_SOC%VBM)
+         END IF
       END IF
 
       CALL cp_cfm_release(cfm_s_ikp)
@@ -1323,7 +1412,7 @@ CONTAINS
 
       CALL timestop(handle)
 
-   END SUBROUTINE dos_pdos_ldos
+   END SUBROUTINE eval_bandstructure_properties
 
 ! **************************************************************************************************
 !> \brief ...
@@ -1594,8 +1683,7 @@ CONTAINS
 
       n_ao = bs_env%n_ao
       homo_spinor = bs_env%n_occ(1) + bs_env%n_occ(bs_env%n_spin)
-      n_E = SIZE(DOS)
-      nkind = SIZE(PDOS, 2)
+      CALL get_qs_env(qs_env, nkind=nkind)
 
       CALL cp_cfm_create(cfm_ks_ikp_spinor, bs_env%cfm_SOC_spinor_ao(1)%matrix_struct)
       CALL cp_cfm_create(cfm_SOC_ikp_spinor, bs_env%cfm_SOC_spinor_ao(1)%matrix_struct)
@@ -1610,7 +1698,7 @@ CONTAINS
 
       ! 1. get V^SOC_µν,σσ'(k_i)
       SELECT CASE (bs_env%small_cell_full_kp_or_large_cell_Gamma)
-      CASE (large_cell_Gamma)
+      CASE (large_cell_Gamma, large_cell_Gamma_ri_rs)
 
          ! 1. get V^SOC_µν,σσ'(k_i) from V^SOC_µν,σσ'(k=0)
          CALL cfm_ikp_from_cfm_spinor_Gamma(cfm_SOC_ikp_spinor, &
@@ -1663,8 +1751,11 @@ CONTAINS
       CALL cp_cfm_heevd(cfm_ks_ikp_spinor, cfm_eigenvec_ikp_spinor, eigenval_spinor)
 
       ! 6. DOS from spinors, no PDOS
-      CALL add_to_DOS_PDOS(DOS, PDOS, eigenval_spinor, &
-                           ikp, bs_env, n_E, E_min, proj_mo_on_kind_spinor)
+      IF (bs_env%do_dos_pdos) THEN
+         n_E = SIZE(DOS)
+         CALL add_to_DOS_PDOS(DOS, PDOS, eigenval_spinor, &
+                              ikp, bs_env, n_E, E_min, proj_mo_on_kind_spinor)
+      END IF
 
       ! 7. valence band max. (VBM), conduction band min. (CBM) and direct bandgap (DBG)
       band_edges%VBM = MAX(band_edges%VBM, eigenval_spinor(homo_spinor))
@@ -2664,7 +2755,7 @@ CONTAINS
       ! Calculate H^SOC_µν,σσ'(k) = sum_α V^SOC_µν^(α)(k)*Pauli-matrix^(α)_σσ'
       ! see Hartwigsen, Goedecker, Hutter, Eq.(18) (doi.org/10.1103/PhysRevB.58.3641)
       SELECT CASE (bs_env%small_cell_full_kp_or_large_cell_Gamma)
-      CASE (large_cell_Gamma)
+      CASE (large_cell_Gamma, large_cell_Gamma_ri_rs)
 
          ! H^SOC_µν,σσ' = sum_α V^SOC_µν^(α)*Pauli-matrix^(α)_σσ'
          CALL H_KS_spinor_Gamma(bs_env)

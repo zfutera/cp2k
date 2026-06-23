@@ -16,6 +16,7 @@ caption: Getting Started
 titlesonly:
 maxdepth: 1
 ---
+getting-started/foreword-and-faq
 getting-started/build-from-source
 getting-started/build-with-spack
 getting-started/distributions
@@ -36,6 +37,7 @@ methods/embedding/index
 methods/qm_mm/index
 methods/sampling/index
 methods/optimization/index
+methods/electronic_structure/index
 methods/properties/index
 ```
 

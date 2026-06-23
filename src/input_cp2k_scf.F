@@ -121,6 +121,10 @@ CONTAINS
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
 
+      CALL create_gce_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
       NULLIFY (keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="MAX_ITER_LUMO", &
@@ -139,7 +143,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="MAX_SCF", &
-                          description="Maximum number of SCF iteration to be performed for one optimization", &
+                          description="Maximum number of inner SCF iterations for one electronic optimization.", &
                           usage="MAX_SCF 200", default_i_val=50)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -167,7 +171,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="EPS_SCF", &
-                          description="Target accuracy for the SCF convergence.", &
+                          description="Target convergence threshold for the inner SCF cycle.", &
                           usage="EPS_SCF 1.e-6", default_r_val=1.e-5_dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -206,7 +210,7 @@ CONTAINS
 
       CALL keyword_create( &
          keyword, __LOCATION__, name="SCF_GUESS", &
-         description="Change the initial guess for the wavefunction.", &
+         description="Selects how the initial wavefunction or density matrix is generated.", &
          usage="SCF_GUESS RESTART", default_i_val=atomic_guess, &
          enum_c_vals=s2a("ATOMIC", "RESTART", "RANDOM", "CORE", &
                          "HISTORY_RESTART", "MOPAC", "EHT", "SPARSE", "NONE"), &
@@ -237,8 +241,9 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="ADDED_MOS", &
-                          description="Number of additional MOS added for each spin. Use -1 to add all available. "// &
-                          "alpha/beta spin can be specified independently (if spin-polarized calculation requested).", &
+                          description="Number of additional molecular orbitals added for each spin channel. "// &
+                          "This is commonly needed for smearing, excited-state, or post-Hartree-Fock calculations. "// &
+                          "Use -1 to add all available orbitals.", &
                           usage="ADDED_MOS", default_i_val=0, n_var=-1)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -434,13 +439,14 @@ CONTAINS
 
       CPASSERT(.NOT. ASSOCIATED(section))
       CALL section_create(section, __LOCATION__, name="OUTER_SCF", &
-                          description="parameters controlling the outer SCF loop", &
+                          description="Controls an outer SCF loop, often used to stabilize difficult OT convergence, "// &
+                          "constraints, or other variables wrapped around the inner SCF cycle.", &
                           n_keywords=13, n_subsections=1, repeats=.FALSE.)
 
       NULLIFY (keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="_SECTION_PARAMETERS_", &
-                          description="controls the activation of the outer SCF loop", &
+                          description="Activates the outer SCF loop.", &
                           usage="&OUTER_SCF ON", default_l_val=.FALSE., lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -525,7 +531,7 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="MAX_SCF", &
-                          description="The maximum number of outer loops ", &
+                          description="Maximum number of outer SCF loops.", &
                           usage="MAX_SCF 20", default_i_val=50)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -1263,7 +1269,7 @@ CONTAINS
 
       CALL section_create(section, __LOCATION__, &
                           name="SMEAR", &
-                          description="Define the smearing of the MO occupation numbers", &
+                          description="Controls smearing of MO occupation numbers for systems with small or zero gaps.", &
                           n_keywords=6, &
                           n_subsections=0, &
                           repeats=.FALSE.)
@@ -1281,7 +1287,7 @@ CONTAINS
 
       CALL keyword_create(keyword, __LOCATION__, &
                           name="METHOD", &
-                          description="Smearing method to be applied", &
+                          description="Selects the smearing method to apply.", &
                           usage="METHOD Fermi_Dirac", &
                           default_i_val=smear_gaussian, &
                           enum_c_vals=s2a("FERMI_DIRAC", "ENERGY_WINDOW", "LIST", "GAUSSIAN", &
@@ -1323,7 +1329,7 @@ CONTAINS
       CALL keyword_create(keyword, __LOCATION__, &
                           name="ELECTRONIC_TEMPERATURE", &
                           variants=s2a("ELEC_TEMP", "TELEC"), &
-                          description="Electronic temperature in the case of Fermi-Dirac smearing", &
+                          description="Electronic temperature used for Fermi-Dirac smearing.", &
                           repeats=.FALSE., &
                           n_var=1, &
                           type_of_var=real_t, &
@@ -2040,5 +2046,64 @@ CONTAINS
       CALL keyword_release(keyword)
 
    END SUBROUTINE create_cdft_opt_section
+
+! **************************************************************************************************
+!> \brief      Create CP2K input section for the grand canonical ensemble DFT
+!> \param section ...
+!> \date
+!> \author     Ziwei Chai
+!> \version    1.0
+! **************************************************************************************************
+   SUBROUTINE create_gce_section(section)
+
+      TYPE(section_type), POINTER                        :: section
+
+      TYPE(keyword_type), POINTER                        :: keyword
+
+      CPASSERT(.NOT. ASSOCIATED(section))
+
+      CALL section_create(section, __LOCATION__, &
+                          name="GCE", &
+                          description="Define the settings of the grand canonical ensemble DFT", &
+                          n_keywords=3, &
+                          n_subsections=0, &
+                          repeats=.FALSE.)
+
+      NULLIFY (keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, &
+                          name="_SECTION_PARAMETERS_", &
+                          description="Controls the activation of grand canonical ensemble DFT", &
+                          usage="&GCE ON", &
+                          default_l_val=.FALSE., &
+                          lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, &
+                          name="TARGET_WORKFUNCTION", &
+                          description="The user input target work function of the symmetric slab model", &
+                          repeats=.FALSE., &
+                          n_var=1, &
+                          type_of_var=real_t, &
+                          default_r_val=0.16_dp, &
+                          unit_str="au_e", &
+                          usage="TARGET_WORKFUNCTION [eV] 0.16")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, &
+                          name="MIXING_COEF", &
+                          description="The proportion of the target work function mixed with the "// &
+                          "work function of the previous SCF iteration", &
+                          repeats=.FALSE., &
+                          n_var=1, &
+                          type_of_var=real_t, &
+                          default_r_val=0.3_dp, &
+                          usage="MIXING_COEF 0.3")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+   END SUBROUTINE create_gce_section
 
 END MODULE input_cp2k_scf

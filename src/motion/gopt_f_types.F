@@ -60,7 +60,9 @@ MODULE gopt_f_types
    TYPE gopt_f_type
       INTEGER                                  :: ref_count = 0
       INTEGER                                  :: nfree = 0
- INTEGER                                  :: type_id=default_cell_method_id, ts_method_id=0, cell_method_id=0, shellcore_method_id=0
+      INTEGER                                  :: type_id = default_cell_method_id
+      INTEGER                                  :: ts_method_id = 0
+      INTEGER                                  :: shellcore_method_id = 0
       LOGICAL                                  :: dimer_rotation = .FALSE., do_line_search = .FALSE., eval_opt_geo = .FALSE.
       CHARACTER(LEN=default_string_length)     :: label = "", tag = ""
       TYPE(force_env_type), POINTER            :: force_env => NULL()
@@ -144,7 +146,7 @@ CONTAINS
                ! already defined for cp2k..
                natom = force_env_get_natom(force_env)
                dimer_section => section_vals_get_subs_vals(geo_opt_section, "TRANSITION_STATE%DIMER")
-               CALL dimer_env_create(gopt_env%dimer_env, subsys, globenv, dimer_section)
+               CALL dimer_env_create(gopt_env%dimer_env, subsys, globenv, dimer_section, force_env)
 
                ! Setup the GEO_OPT environment for the rotation of the Dimer
                rot_opt_section => section_vals_get_subs_vals(dimer_section, "ROT_OPT")
@@ -165,7 +167,6 @@ CONTAINS
          gopt_env%nfree = 6
          gopt_env%label = "CELL_OPT"
          gopt_env%tag = "  CELL  "
-         gopt_env%cell_method_id = gopt_param%cell_method_id
          ALLOCATE (gopt_env%cell_env)
          CALL cell_opt_env_create(gopt_env%cell_env, force_env, gopt_env%geo_section)
       CASE (default_shellcore_method_id)

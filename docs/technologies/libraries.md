@@ -94,6 +94,106 @@ respectivly to CMake.
   created.
 - Pass `-DCP2K_USE_LIBXC=ON` to CMake.
 
+## GauXC (xc integration library)
+
+GauXC can be used to evaluate selected exchange-correlation functionals through an external
+integrator.
+
+- Pass `--with-gauxc=install` to the toolchain installer. The toolchain build enables GauXC
+  OneDFT/SKALA support and therefore also installs libtorch.
+- Pass `-DCP2K_USE_GAUXC=ON` to CMake.
+- GauXC in CP2K is primarily an energy, potential, and nuclear-gradient path for isolated QS
+  systems. A limited isolated-cell reference path can be enabled with `PERIODIC_REFERENCE T` for
+  Gamma-only, single-image `METHOD GPW` calculations with GTH pseudopotentials in periodic
+  `PERIODIC XYZ` inputs. This opt-in path keeps molecular validation inputs usable when CP2K is run
+  with periodic boundary conditions, but it still uses GauXC's molecular quadrature. It must not be
+  used as validation for compact periodic materials. k-points, periodic neighbour-cell AO blocks,
+  compact-cell quadrature, GAPW/GAPW_XC, and periodic stress tensors require a dedicated periodic
+  GauXC design. OneDFT/SKALA gradients under MPI are evaluated with a replicated single-rank GauXC
+  runtime on each CP2K rank because GauXC does not yet provide distributed OneDFT gradients.
+- OneDFT/SKALA is selected in the `&GAUXC` subsection with a non-`NONE` `MODEL`, for example a
+  `.fun` model file or a GauXC-installed model name. The `FUNCTIONAL` keyword is optional for
+  OneDFT/SKALA inputs and defaults to `PBE`; `MODEL SKALA` inputs do not need an explicit
+  `FUNCTIONAL PBE` line.
+- `ONEDFT_ATOM_CHUNK_SIZE` can be used to control the GauXC OneDFT/SKALA Torch atom blocking from
+  CP2K. A positive value requests atom-by-atom chunks of that size, zero disables atom chunking, and
+  the default leaves GauXC's model policy or `GAUXC_ONEDFT_ATOM_CHUNK_SIZE` environment setting in
+  control.
+- `GAUXC_GRADIENT_MPI_RUNTIME=1` is an experimental runtime override for testing GauXC versions that
+  provide distributed OneDFT nuclear gradients. The default remains the conservative replicated
+  single-rank gradient runtime for MPI calculations.
+- `CP2K_GAUXC_STATUS_STDERR=1` mirrors GauXC status messages to standard error. This is useful when
+  launcher or CI logs hide the CP2K output file after an external-library failure.
+- Some OpenBLAS/libtorch combinations can be sensitive to BLAS symbol resolution for TorchScript
+  models using batched matrix products. If a SKALA run crashes in `cblas_sgemm_batch`, use a
+  compatible BLAS setup or ensure `libtorch_cpu.so` is loaded before `libopenblas.so`.
+- `METHOD GAPW` with OneDFT/SKALA is a molecular GauXC matrix path. GauXC evaluates the full XC term
+  directly on its molecular quadrature from the AO density. For pseudopotential inputs this is the
+  smooth valence density, so CP2K's local/semi-local GAPW one-center XC correction is not used for
+  OneDFT/SKALA. GAPW pseudopotential inputs currently support energies only in this path; nuclear
+  gradients and molecular virials require a dedicated derivative of the molecular AO/valence-density
+  XC path. NLCC pseudopotentials remain unsupported because the frozen core density would need a
+  SKALA-consistent feature definition.
+- `METHOD GAPW_XC` with GauXC remains disabled pending a dedicated design for the smooth-density and
+  one-center XC terms. It must not be used for non-local OneDFT/SKALA models.
+- A true compact-cell periodic GauXC path needs a new GauXC interface rather than only a CP2K input
+  change. The missing pieces are an explicit cell/lattice descriptor, a unit-cell quadrature or
+  CP2K-grid task interface, periodic AO images or an equivalent periodic density representation,
+  return of the periodic XC matrix to CP2K's image/k-point layout, and separate force/stress
+  derivatives. PBE-through-GauXC on compact Gamma-only `METHOD GPW` test cells should be the first
+  quantitative validation target for that interface.
+- A CP2K-native SKALA grid path is a separate research direction from periodic GauXC. The SKALA
+  TorchScript protocol requires the meta-GGA grid features `density`, `grad`, and `kin`, the
+  integration features `grid_coords` and `grid_weights`, and the per-atom packing metadata
+  `atomic_grid_weights`, `atomic_grid_sizes`, `atomic_grid_size_bound_shape`, and
+  `coarse_0_atomic_coords`. For Gamma-only periodic `METHOD GPW` this maps naturally to CP2K's
+  regular real-space grid for the density, gradient, kinetic-energy density, grid coordinates, and
+  weights. The non-local SKALA part still requires an explicit, validated atom-to-grid partition
+  before it can be considered a compact periodic implementation. MPI runs gather the local GPW grid
+  features into the same atom-partitioned feature block on every rank and evaluate the Torch model
+  redundantly; this is a correctness path for distributed CP2K grids, not yet a scalable distributed
+  SKALA integration algorithm.
+- For such a native SKALA path the first useful implementation target is energy, VXC, and nuclear
+  gradients on Gamma-only `METHOD GPW` with GTH pseudopotentials, `FUNCTIONAL PBE`, one `GAUXC`
+  functional, and a single image. The force path combines CP2K's regular GPW density-response
+  integration with the explicit Torch autograd derivative of the SKALA coarse atomic coordinates.
+  The current atom partition is a fixed nearest-atom partition between assignment changes; periodic
+  stress, k-points, ROKS, ADMM, and NLCC pseudopotentials should remain separate validation steps.
+  `METHOD GAPW` is not enabled in this native grid path yet: a valid GAPW extension has to
+  reconstruct not only an all-electron density on the CP2K grid, but also the corresponding density
+  gradients and kinetic-energy density entering the SKALA features. GAPW pseudopotential
+  augmentation corrections remain a separate methodological problem.
+- The first native-grid GAPW target should be all-electron GAPW only. The required design is to
+  build a SKALA feature block from the reconstructed all-electron density, gradient, and
+  kinetic-energy density on a well-defined grid and validate it against the molecular all-electron
+  GauXC matrix path before adding pseudopotential augmentation corrections, `GAPW_XC`, periodic
+  stresses, or k-points.
+- `NATIVE_GRID_DIAGNOSTICS T` prints the electron count, spin moment, and summed grid weights of the
+  CP2K-native SKALA feature block passed to Torch. This is intended for compact RKS/UKS,
+  wrapped-cell atom-partition, and MPI/OpenMP validation runs.
+- `NATIVE_GRID_USE_CUDA T` evaluates the experimental CP2K-native SKALA Torch model on CUDA if the
+  linked libtorch provides CUDA support. This is an explicit opt-in because CUDA-exported SKALA
+  models can create internal ragged-index tensors on CUDA.
+- `NATIVE_GRID_CUDA_DEVICE` controls the visible CUDA device used by the native-grid Torch path. The
+  default value `0` preserves the previous behavior of using logical `cuda:0`. A negative value maps
+  the MPI-local rank to a visible CUDA device, so multi-rank jobs can use multiple logical CUDA
+  devices. The Torch wrapper loads TorchScript models through CPU and then moves them to the
+  selected CUDA device, and guards Torch calls with that device so rank-local model internals and
+  input tensors stay on the same GPU. Some CUDA-exported TorchScript models still embed `cuda:0`
+  graph constants; those exports need per-rank `CUDA_VISIBLE_DEVICES` set before CP2K starts. When
+  CUDA is enabled the native-grid diagnostic output also prints the selected logical and visible
+  device for each real-space-grid rank.
+- Molecular CDFT and mixed CDFT-CI energy calculations can be used with the GauXC matrix path. SKALA
+  CDFT coverage is currently limited to smoke tests of the energy and constraint-potential path.
+- Response/kernel properties requiring higher XC derivatives are not supported by the GauXC path and
+  abort explicitly.
+- Supported OneDFT/SKALA force checks use `GRID SUPERFINE` and `PRUNING_SCHEME UNPRUNED` by default.
+  Coarser explicit GauXC grids are allowed, but should be treated as accuracy settings.
+- `MOLECULAR_VIRIAL` is a finite-system force diagnostic from GauXC nuclear gradients, not a
+  periodic stress tensor.
+- SKALA regression tests are technical smoke and force-consistency checks. They do not constitute
+  scientific validation of the SKALA model.
+
 ## PEXSI (low scaling SCF method)
 
 The Pole EXpansion and Selected Inversion (PEXSI) method requires the PEXSI library and two
@@ -128,12 +228,13 @@ A library for finding and handling crystal symmetries
 
 ## SIRIUS (plane wave calculations)
 
-SIRIUS is a domain specific library for electronic structure calculations.
+SIRIUS is a domain specific library for electronic structure calculations with plane wave method.
 
 - The code is available at <https://github.com/electronic-structure/SIRIUS>
 - For building CP2K with SIRIUS pass `-DCP2K_USE_SIRIUS=ON` to CMake.
 - Pass `-DCP2K_USE_LIBVDWXC=ON` if support is activated in SIRIUS.
-- Pass `-DCP2K_USE_SIRIUS_DFTD4=ON` when sirius is compiled with dftd3 and dftd4 support.
+- Pass `-DCP2K_USE_SIRIUS_DFTD3=ON` when sirius is compiled with dftd3 support.
+- Pass `-DCP2K_USE_SIRIUS_DFTD4=ON` when sirius is compiled with dftd4 support.
 - Pass `-DCP2K_USE_SIRIUS_NLCG=ON` when sirius is compiled with nlcg support.
 - Pass `-DCP2K_USE_SIRIUS_VCSQNM=ON` when sirius is compiled with variable cell relaxation support.
 - See <https://electronic-structure.github.io/SIRIUS-doc/> for more information.
@@ -156,17 +257,16 @@ SIRIUS is a domain specific library for electronic structure calculations.
   <https://brehm-research.de/bqb> for more information as well as the `bqbtool` to inspect BQB
   files.
 
-## SpFFT (Sparse 3D FFT)
-
-- SpFFT is a 3D FFT library for sparse frequency domain data written in C++ with support for MPI,
-  OpenMP, CUDA and ROCm.
-- Pass `-DCP2K_USE_SpFFT=ON` to CMake to enable support for SpFFT.
-- See <https://github.com/eth-cscs/SpFFT> for more information.
-
 ## Torch (Machine Learning Framework needed for NequIP)
 
 - The C++ API of PyTorch can be downloaded from https://pytorch.org/get-started/locally/.
 - Pass `-DCP2K_USE_LIBTORCH=ON` to CMake to enable support for libtorch.
+
+```{caution}
+Note that currently pre-built libtorch bundle (up to 2.12.1) is not compatible with CP2K's external
+oneMKL linking stack. If you build CP2K with MKL and want to enable libtorch, you may need to build
+it by yourself.
+```
 
 ## SPLA (Matrix-matrix multiplication offloading on GPU)
 
@@ -224,6 +324,13 @@ TREXIO - Open-source file format and library. Support for TREXIO can be enabled 
 
 - TREXIO library can be downloaded from <https://github.com/trex-coe/trexio>
 - For more information see <https://trex-coe.github.io/trexio/index.html>.
+
+## LibFCI (full-CI active-space solver)
+
+LibFCI is an external library providing a full-CI solver for CP2K active-space calculations. Support
+for LibFCI can be enabled by passing `-DCP2K_USE_LIBFCI=ON` to CMake.
+
+- LibFCI can be downloaded from <https://github.com/DCM-Uni-Paderborn/libfci>
 
 ## GREENX (basically functionality for GreenX methods (RPA, GW, Laplace-MP2 etc.)
 

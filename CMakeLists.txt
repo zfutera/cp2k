@@ -129,11 +129,17 @@ option(CP2K_USE_TBLITE "Enable TBLITE support" ${CP2K_USE_EVERYTHING})
 option(CP2K_USE_FFTW3 "Enable FFTW3 support" ${CP2K_USE_EVERYTHING})
 option(CP2K_USE_GREENX "Enable GreenX support" ${CP2K_USE_EVERYTHING})
 option(CP2K_USE_HDF5 "Enable HDF5 support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_LIBFCI "Enable LibFCI active-space solver support"
+       ${CP2K_USE_EVERYTHING})
 option(CP2K_USE_LIBINT2 "Enable Libint2 support" ${CP2K_USE_EVERYTHING})
 option(CP2K_USE_LIBTORCH "Enable LibTorch support" ${CP2K_USE_EVERYTHING})
 option(CP2K_USE_OPENPMD "Enable support for I/O via openPMD" OFF)
 option(CP2K_USE_LIBXC "Enable LibXC support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_GAUXC "Enable GauXC support" ${CP2K_USE_EVERYTHING})
 option(CP2K_USE_MPI "Enable MPI support" ${CP2K_USE_EVERYTHING})
+option(CP2K_USE_LIBXS
+       "Enable LIBXS support; required if OpenCL backend enabled"
+       ${CP2K_USE_EVERYTHING})
 option(CP2K_USE_PEXSI "Enable PEXSI support" ${CP2K_USE_EVERYTHING})
 option(CP2K_USE_SPGLIB "Enable Spglib support" ${CP2K_USE_EVERYTHING})
 option(CP2K_USE_TREXIO "Enable TREXIO support" ${CP2K_USE_EVERYTHING})
@@ -167,24 +173,22 @@ cmake_dependent_option(CP2K_USE_SPLA "Enable SpLA support"
                        ${CP2K_USE_EVERYTHING} "CP2K_USE_MPI" OFF)
 cmake_dependent_option(CP2K_USE_MIMIC "Enable MIMIC support"
                        ${CP2K_USE_EVERYTHING} "CP2K_USE_MPI" OFF)
-cmake_dependent_option(
-  CP2K_USE_LIBXSMM "Enable libxsmm support" ${CP2K_USE_EVERYTHING}
-  "NOT CP2K_USE_ACCEL MATCHES \"OPENCL\"" ON)
+
+cmake_dependent_option(CP2K_USE_LIBXSMM "Enable LIBXSMM JIT-kernel for LIBXS"
+                       ${CP2K_USE_EVERYTHING} "CP2K_USE_LIBXS" OFF)
+
 cmake_dependent_option(CP2K_USE_LIBVDWXC "Enable libvdwxc support with SIRIUS"
                        ${CP2K_USE_EVERYTHING} "CP2K_USE_SIRIUS" OFF)
 
 # do not turn it on if sirius is built with the toolchain
-cmake_dependent_option(
-  CP2K_USE_SIRIUS_DFTD4 "Enable dftd3 and dftd4 sirius support" OFF
-  "CP2K_USE_SIRIUS" OFF)
+cmake_dependent_option(CP2K_USE_SIRIUS_DFTD3 "Enable dftd3 sirius support" OFF
+                       "CP2K_USE_SIRIUS" OFF)
+cmake_dependent_option(CP2K_USE_SIRIUS_DFTD4 "Enable dftd4 sirius support" OFF
+                       "CP2K_USE_SIRIUS" OFF)
 cmake_dependent_option(
   CP2K_USE_SIRIUS_VCSQNM "Enable variable cell shape relaxation in SIRIUS" OFF
   "CP2K_USE_SIRIUS" OFF)
-
 cmake_dependent_option(CP2K_USE_SIRIUS_NLCG "Enable nlcg method in SIRIUS" OFF
-                       "CP2K_USE_SIRIUS" OFF)
-
-cmake_dependent_option(CP2K_USE_SpFFT "Enable spare FFT in SIRIUS" OFF
                        "CP2K_USE_SIRIUS" OFF)
 
 cmake_dependent_option(
@@ -258,7 +262,7 @@ set_property(
            "NVHPCBlas"
            "CUSTOM")
 
-set(CP2K_SCALAPACK_VENDOR_LIST "MKL" "SCI" "GENERIC" "auto")
+set(CP2K_SCALAPACK_VENDOR_LIST "MKL" "NVPL" "SCI" "GENERIC" "auto")
 set(CP2K_SCALAPACK_VENDOR
     "auto"
     CACHE STRING "ScaLAPACK vendor/generic backend")
@@ -269,6 +273,17 @@ if(DEFINED CP2K_SCALAPACK_VENDOR)
   if(NOT ${CP2K_SCALAPACK_VENDOR} IN_LIST CP2K_SCALAPACK_VENDOR_LIST)
     message(FATAL_ERROR "An invalid ScaLAPACK vendor backend was specified")
   endif()
+endif()
+
+set(CP2K_NVPL_SCALAPACK_MPI
+    "auto"
+    CACHE STRING "NVPL BLACS MPI interface")
+set(CP2K_NVPL_SCALAPACK_MPI_LIST "auto" "mpich" "openmpi3" "openmpi4"
+                                 "openmpi5")
+set_property(CACHE CP2K_NVPL_SCALAPACK_MPI
+             PROPERTY STRINGS ${CP2K_NVPL_SCALAPACK_MPI_LIST})
+if(NOT CP2K_NVPL_SCALAPACK_MPI IN_LIST CP2K_NVPL_SCALAPACK_MPI_LIST)
+  message(FATAL_ERROR "An invalid NVPL ScaLAPACK MPI interface was specified")
 endif()
 
 set(CP2K_DATA_DIR
@@ -288,6 +303,7 @@ set(CP2K_SUPPORTED_CUDA_ARCHITECTURES
     V100
     A100
     H100
+    GB10
     A40)
 set(CP2K_SUPPORTED_HIP_ARCHITECTURES
     Mi50
@@ -302,6 +318,7 @@ set(CP2K_SUPPORTED_HIP_ARCHITECTURES
     V100
     A100
     H100
+    GB10
     A40)
 
 set(CP2K_WITH_GPU
@@ -316,6 +333,7 @@ set_property(
 set(CP2K_USE_ACCEL
     "NONE"
     CACHE STRING "Set hardware acceleration support: CUDA, HIP, OPENCL")
+string(TOUPPER "${CP2K_USE_ACCEL}" CP2K_USE_ACCEL)
 
 set_property(CACHE CP2K_USE_ACCEL
              PROPERTY STRINGS ${CP2K_SUPPORTED_ACCELERATION_TARGETS})
@@ -441,10 +459,31 @@ endif()
 # BLAS & LAPACK, PkgConfig
 find_package(Lapack REQUIRED) # also calls find_package(BLAS)
 
+message("\n------------------------------------------------------------")
+message("-                          DBCSR                           -")
+message("------------------------------------------------------------\n")
+
+if(CP2K_USE_DBCSR_CONFIG)
+  find_package(DBCSR 2.9 REQUIRED CONFIG)
+  if(CP2K_USE_MPI AND NOT DBCSR_USE_MPI)
+    message(
+      FATAL_ERROR
+        "DBCSR needs to be compiled with MPI support when CP2K MPI support is enabled"
+    )
+  endif()
+else()
+  find_package(DBCSR 2.8 REQUIRED)
+endif()
+
 # SMM (Small Matrix-Matrix multiplication)
-if(CP2K_USE_LIBXSMM)
-  find_package(LibXSMM REQUIRED)
-  message(STATUS "Using LIBXSMM for Small Matrix Multiplication")
+if(CP2K_USE_LIBXS)
+  find_package(libxs REQUIRED)
+  if(CP2K_USE_LIBXSMM)
+    find_package(libxsmm CONFIG REQUIRED)
+    message(STATUS "Using LIBXS + LIBXSMM for Small Matrix Multiplication")
+  else()
+    message(STATUS "Using LIBXS for Small Matrix Multiplication")
+  endif()
 endif()
 
 # in practice it is always for any decent configuration. But I add a flags to
@@ -463,6 +502,7 @@ if((CP2K_USE_ACCEL MATCHES CUDA) OR (CP2K_USE_ACCEL MATCHES HIP))
   set(CP2K_GPU_ARCH_NUMBER_V100 70)
   set(CP2K_GPU_ARCH_NUMBER_A100 80)
   set(CP2K_GPU_ARCH_NUMBER_H100 90)
+  set(CP2K_GPU_ARCH_NUMBER_GB10 121)
   set(CP2K_GPU_ARCH_NUMBER_A40 86)
   set(CP2K_GPU_ARCH_NUMBER_Mi50 gfx906)
   set(CP2K_GPU_ARCH_NUMBER_Mi100 gfx908)
@@ -616,47 +656,38 @@ message("------------------------------------------------------------\n")
 # PACKAGE DISCOVERY (compiler configuration can impact package discovery)
 find_package(OpenMP REQUIRED COMPONENTS Fortran C CXX)
 
-message("\n------------------------------------------------------------")
-message("-                          DBCSR                           -")
-message("------------------------------------------------------------\n")
-
-if(CP2K_USE_DBCSR_CONFIG)
-  find_package(DBCSR 2.9 REQUIRED CONFIG)
-  if(CP2K_USE_MPI AND NOT DBCSR_USE_MPI)
+# Discover OpenCL backend via LIBXSTREAM.
+if(CP2K_USE_ACCEL MATCHES "OPENCL")
+  if(NOT CP2K_USE_LIBXS)
     message(
       FATAL_ERROR
-        "DBCSR needs to be compiled with MPI support when CP2K MPI support is enabled"
-    )
+        "CP2K_USE_LIBXS is not set but LIBXS is required for OpenCL backend.")
   endif()
-else()
-  find_package(DBCSR 2.6 REQUIRED)
-endif()
-
-# Discover CP2K_OPENCL_BACKEND. DBCSR must be discovered prior (DBCSR_DIR).
-if(CP2K_USE_ACCEL MATCHES "OPENCL")
   message("\n------------------------------------------------------------")
   message("-                          OPENCL                          -")
   message("------------------------------------------------------------\n")
+  # Hint additional OpenCL locations (Intel oneAPI, CUDA toolkit)
+  if(DEFINED ENV{CMPLR_ROOT})
+    list(APPEND CMAKE_PREFIX_PATH "$ENV{CMPLR_ROOT}")
+  endif()
+  if(DEFINED ENV{CUDA_PATH})
+    list(APPEND CMAKE_PREFIX_PATH "$ENV{CUDA_PATH}")
+  endif()
   find_package(OpenCL REQUIRED)
+  find_package(libxstream REQUIRED)
+  message(STATUS "Using LIBXSTREAM for the OpenCL backend")
 
-  set(CP2K_OPENCL_BACKEND "${DBCSR_DIR}/../../../include/acc/opencl")
-  if(NOT EXISTS ${CP2K_OPENCL_BACKEND})
-    get_target_property(CP2K_DBCSR_INCLUDE_DIRS DBCSR::dbcsr
-                        INTERFACE_INCLUDE_DIRECTORIES)
-    list(GET CP2K_DBCSR_INCLUDE_DIRS 0 CP2K_DBCSR_INCLUDE_DIR)
-    set(CP2K_OPENCL_BACKEND "${CP2K_DBCSR_INCLUDE_DIR}/acc/opencl")
-  endif()
-
-  set(CP2K_OPENCL_SCRIPT
-      "${CP2K_OPENCL_BACKEND}/../../../share/opencl/acc_opencl.sh")
-  if(EXISTS ${CP2K_OPENCL_SCRIPT})
-    set(CP2K_OPENCL_COMMON common/opencl_atomics.h common/opencl_common.h)
-    list(TRANSFORM CP2K_OPENCL_COMMON PREPEND ${CP2K_OPENCL_BACKEND}/)
-    set(CP2K_USE_OPENCL ON)
-    message(STATUS "OpenCL backend found")
+  unset(CP2K_OPENCL_BACKEND CACHE)
+  if(EXISTS "${LIBXSTREAM_INCLUDE_DIRS}/libxstream/opencl")
+    set(CP2K_OPENCL_BACKEND "${LIBXSTREAM_INCLUDE_DIRS}/libxstream")
   else()
-    message(FATAL_ERROR "OpenCL backend not found")
+    set(CP2K_OPENCL_BACKEND "${LIBXSTREAM_INCLUDE_DIRS}")
   endif()
+  set(CP2K_OPENCL_SAMPLES "${LIBXSTREAM_SMM_DIR}")
+  set(CP2K_OPENCL_SCRIPT "${LIBXSTREAM_OPENCL_SCRIPT}")
+  set(CP2K_OPENCL_COMMON "${LIBXSTREAM_OPENCL_SCRIPT}")
+  set(CP2K_USE_OPENCL ON)
+  message(STATUS "OpenCL backend found")
 endif()
 
 message("\n------------------------------------------------------------")
@@ -668,7 +699,18 @@ if(CP2K_USE_ELPA)
 endif()
 
 if(CP2K_USE_LIBXC)
-  find_package(Libxc 7 REQUIRED CONFIG)
+  find_package(Libxc 7 REQUIRED)
+endif()
+
+if(CP2K_USE_GAUXC)
+  find_package(Threads REQUIRED)
+  find_package(gauxc REQUIRED CONFIG)
+  if(CP2K_USE_MPI AND NOT GAUXC_HAS_MPI)
+    message(
+      FATAL_ERROR
+        "CP2K is being configured with MPI, but a non-MPI installation of GauXC has been found."
+    )
+  endif()
 endif()
 
 if(CP2K_USE_HDF5)
@@ -703,8 +745,41 @@ endif()
 if(CP2K_USE_DLAF)
   find_package(DLAFFortran 0.4.0 REQUIRED)
 
+  if(TARGET DLAF::Fortran)
+    set(CP2K_DLAF_FORTRAN_TARGET DLAF::Fortran)
+  elseif(TARGET DLAF::DLAF_Fortran)
+    set(CP2K_DLAF_FORTRAN_TARGET DLAF::DLAF_Fortran)
+  else()
+    message(FATAL_ERROR "Could not find a DLA-Future-Fortran CMake target")
+  endif()
+
   get_target_property(CP2K_DLAF_INCLUDE_DIRS DLAF::DLAF
                       INTERFACE_INCLUDE_DIRECTORIES)
+  get_target_property(CP2K_DLAF_FORTRAN_INCLUDE_DIRS
+                      ${CP2K_DLAF_FORTRAN_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
+  if(CP2K_DLAF_FORTRAN_INCLUDE_DIRS)
+    list(APPEND CP2K_DLAF_INCLUDE_DIRS ${CP2K_DLAF_FORTRAN_INCLUDE_DIRS})
+  else()
+    get_target_property(CP2K_DLAF_FORTRAN_LIBRARY ${CP2K_DLAF_FORTRAN_TARGET}
+                        IMPORTED_LOCATION_RELEASE)
+    if(NOT CP2K_DLAF_FORTRAN_LIBRARY)
+      get_target_property(CP2K_DLAF_FORTRAN_LIBRARY ${CP2K_DLAF_FORTRAN_TARGET}
+                          IMPORTED_LOCATION)
+    endif()
+    if(CP2K_DLAF_FORTRAN_LIBRARY)
+      get_filename_component(CP2K_DLAF_FORTRAN_PREFIX
+                             "${CP2K_DLAF_FORTRAN_LIBRARY}" DIRECTORY)
+      get_filename_component(CP2K_DLAF_FORTRAN_PREFIX
+                             "${CP2K_DLAF_FORTRAN_PREFIX}" DIRECTORY)
+      # we will need to fix this issue later because it requires small
+      # modifications of the dlaf build system. It should not be hardcoded.
+      if(EXISTS "${CP2K_DLAF_FORTRAN_PREFIX}/include/dlaf_fortran.mod")
+        list(APPEND CP2K_DLAF_INCLUDE_DIRS
+             "${CP2K_DLAF_FORTRAN_PREFIX}/include")
+      endif()
+    endif()
+  endif()
+  list(REMOVE_DUPLICATES CP2K_DLAF_INCLUDE_DIRS)
   get_target_property(CP2K_DLAF_LINK_LIBRARIES DLAF::dlaf.prop
                       INTERFACE_LINK_LIBRARIES)
   message("${CP2K_DLAF_INCLUDE_DIRS} ${CP2K_DLAF_LINK_LIBRARIES}")
@@ -754,6 +829,13 @@ endif()
 # Libint
 if(CP2K_USE_LIBINT2)
   find_package(Libint2 REQUIRED)
+  # Prefer the headers and Fortran module that match the selected libint
+  # library. System include paths can otherwise shadow a locally built libint.
+  include_directories(BEFORE ${CP2K_LIBINT2_INCLUDE_DIRS})
+endif()
+
+if(CP2K_USE_LIBFCI)
+  find_package(LibFCI REQUIRED)
 endif()
 
 # Spglib
@@ -791,6 +873,12 @@ if(CP2K_USE_DFTD4)
   else()
     set(CP2K_USE_DFTD4_V3 OFF)
   endif()
+  if(dftd4_VERSION VERSION_GREATER_EQUAL "4.2.0")
+    message(STATUS "DFTD4: found version ${dftd4_VERSION}, using v4.2+ API")
+    set(CP2K_USE_DFTD4_V4_2 ON)
+  else()
+    set(CP2K_USE_DFTD4_V4_2 OFF)
+  endif()
 endif()
 
 if(CP2K_USE_DEEPMD)
@@ -806,18 +894,14 @@ if(CP2K_USE_PEXSI)
 endif()
 
 if(CP2K_USE_ACE)
-  find_package(ACE REQUIRED)
-  get_target_property(CP2K_ACE_INCLUDE_DIRS cp2k::ACE
+  find_package(pace REQUIRED CONFIG)
+  get_target_property(CP2K_ACE_INCLUDE_DIRS pace::pace
                       INTERFACE_INCLUDE_DIRECTORIES)
-  get_target_property(CP2K_ACE_LINK_LIBRARIES cp2k::ACE
+  get_target_property(CP2K_ACE_LINK_LIBRARIES pace::pace
                       INTERFACE_LINK_LIBRARIES)
 endif()
 
 if(CP2K_USE_TBLITE)
-  find_package(mctc-lib REQUIRED)
-  find_package(toml-f REQUIRED)
-  find_package(dftd4 REQUIRED)
-  find_package(s-dftd3 REQUIRED)
   find_package(tblite REQUIRED)
   add_library(cp2k::tblite INTERFACE IMPORTED)
   target_link_libraries(
@@ -829,6 +913,12 @@ if(CP2K_USE_TBLITE)
     set(CP2K_USE_DFTD4_V3 ON)
   else()
     set(CP2K_USE_DFTD4_V3 OFF)
+  endif()
+  if(dftd4_VERSION VERSION_GREATER_EQUAL "4.2.0")
+    message(STATUS "DFTD4: found version ${dftd4_VERSION}, using v4.2+ API")
+    set(CP2K_USE_DFTD4_V4_2 ON)
+  else()
+    set(CP2K_USE_DFTD4_V4_2 OFF)
   endif()
 endif()
 
@@ -988,15 +1078,19 @@ if((CP2K_USE_ACCEL MATCHES "CUDA") OR (CP2K_USE_ACCEL MATCHES "HIP"))
 endif()
 
 if(CP2K_USE_CUSOLVER_MP)
-  message(
-    "   - CUSolverMP: \n"
-    "     - library: ${CP2K_CUSOLVER_MP_LINK_LIBRARIES} \n"
-    "     - include: ${CP2K_CUSOLVER_MP_INCLUDE_DIRS} \n"
-    "     - CAL library: ${CP2K_CAL_LINK_LIBRARIES} \n"
-    "     - CAL include: ${CP2K_CAL_INCLUDE_DIRS} \n"
-    "     - ucc library: ${CP2K_UCC_LINK_LIBRARIES} \n"
-    "     - ucx library: ${CP2K_UCX_LINK_LIBRARIES} \n"
-    "     - ucc include: ${CP2K_UCC_INCLUDE_DIRS} \n")
+  message("   - CUSolverMP: \n"
+          "     - library: ${CP2K_CUSOLVER_MP_LINK_LIBRARIES} \n"
+          "     - include: ${CP2K_CUSOLVER_MP_INCLUDE_DIRS} \n")
+  if(CP2K_CUSOLVERMP_USE_NCCL)
+    message("     - NCCL library: ${CP2K_NCCL_LINK_LIBRARIES} \n"
+            "     - NCCL include: ${CP2K_NCCL_INCLUDE_DIRS} \n")
+  else()
+    message("     - CAL library: ${CP2K_CAL_LINK_LIBRARIES} \n"
+            "     - CAL include: ${CP2K_CAL_INCLUDE_DIRS} \n")
+  endif()
+  message("     - ucc library: ${CP2K_UCC_LINK_LIBRARIES} \n"
+          "     - ucx library: ${CP2K_UCX_LINK_LIBRARIES} \n"
+          "     - ucc include: ${CP2K_UCC_INCLUDE_DIRS} \n")
 endif()
 
 if(CP2K_USE_LIBXC)
@@ -1005,6 +1099,12 @@ if(CP2K_USE_LIBXC)
     "    - version:  ${Libxc_VERSION}\n"
     "    - include directories: ${Libxc_INCLUDE_DIRS}\n"
     "    - libraries: ${Libxc_LIBRARIES}\n\n")
+endif()
+
+if(CP2K_USE_GAUXC)
+  message("  - GauXC\n" # let below line separate
+          "    - version:  ${gauxc_VERSION}\n"
+          "    - install directories:  ${gauxc_DIR}")
 endif()
 
 if(CP2K_USE_SPGLIB)
@@ -1042,12 +1142,10 @@ if(CP2K_USE_PLUMED)
           "    - libraries: ${CP2K_PLUMED_LINK_LIBRARIES}\n\n")
 endif()
 
-if(CP2K_USE_LIBXSMM)
-  message(
-    "  - LIBXSMM\n"
-    "    - include directories: ${CP2K_LIBXSMM_INCLUDE_DIRS}\n"
-    "    - libraries: ${CP2K_LIBXSMMEXT_LINK_LIBRARIES};${CP2K_LIBXSMMF_LINK_LIBRARIES}\n\n"
-  )
+if(CP2K_USE_LIBXS)
+  message("  - LIBXS\n"
+          "    - include directories: ${CP2K_LIBXS_INCLUDE_DIRS}\n"
+          "    - libraries: ${CP2K_LIBXS_LINK_LIBRARIES}\n\n")
 endif()
 
 if(CP2K_USE_SPLA)
@@ -1116,6 +1214,12 @@ if(CP2K_USE_LIBINT2)
   message(" - Libint2\n"
           "   - include directories: ${CP2K_LIBINT2_INCLUDE_DIRS}\n"
           "   - libraries: ${CP2K_LIBINT2_LINK_LIBRARIES}\n\n")
+endif()
+
+if(CP2K_USE_LIBFCI)
+  message(" - LibFCI\n"
+          "   - include directories: ${CP2K_LIBFCI_INCLUDE_DIRS}\n"
+          "   - libraries: ${CP2K_LIBFCI_LINK_LIBRARIES}\n\n")
 endif()
 
 if(CP2K_USE_VORI)
@@ -1225,6 +1329,10 @@ if(NOT CP2K_USE_PLUMED)
   message("   - PLUMED")
 endif()
 
+if(NOT CP2K_USE_LIBXS)
+  message("   - LIBXS")
+endif()
+
 if(NOT CP2K_USE_LIBXSMM)
   message("   - LIBXSMM")
 endif()
@@ -1233,8 +1341,16 @@ if(NOT CP2K_USE_LIBINT2)
   message("   - Libint2")
 endif()
 
+if(NOT CP2K_USE_LIBFCI)
+  message("   - LibFCI")
+endif()
+
 if(NOT CP2K_USE_LIBXC)
   message("   - LibXC")
+endif()
+
+if(NOT CP2K_USE_GAUXC)
+  message("   - GauXC")
 endif()
 
 if(NOT CP2K_USE_VORI)
@@ -1292,13 +1408,22 @@ foreach(__ext_pair "psmp:popt" "ssmp:sopt")
   list(GET __ext_list 0 __src_ext)
   list(GET __ext_list 1 __link_ext)
   if(__cp2k_ext MATCHES ${__src_ext})
+    if(IS_ABSOLUTE "${CMAKE_INSTALL_BINDIR}")
+      set(__cp2k_alias_bindir "${CMAKE_INSTALL_BINDIR}")
+    else()
+      set(__cp2k_alias_bindir
+          "\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
+    endif()
+
     install(
       CODE "
+      set(__cp2k_alias_bindir \"\$ENV{DESTDIR}${__cp2k_alias_bindir}\")
       message(STATUS \"Creating symlink: cp2k.${__link_ext} -> cp2k.${__src_ext}\")
       execute_process(
-        COMMAND ${CMAKE_COMMAND} -E create_symlink
-          cp2k.${__src_ext}
-          \${CMAKE_INSTALL_PREFIX}/bin/cp2k.${__link_ext})
+        COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
+          \"cp2k.${__src_ext}\"
+          \"\${__cp2k_alias_bindir}/cp2k.${__link_ext}\"
+        COMMAND_ERROR_IS_FATAL ANY)
     ")
   endif()
 endforeach()

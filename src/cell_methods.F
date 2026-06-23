@@ -33,8 +33,8 @@ MODULE cell_methods
    USE cp_units,                        ONLY: cp_unit_from_cp2k,&
                                               cp_unit_to_cp2k
    USE input_constants,                 ONLY: &
-        do_cell_cif, do_cell_cp2k, do_cell_extxyz, do_cell_pdb, do_cell_xsc, do_coord_cif, &
-        do_coord_cp2k, do_coord_pdb, do_coord_xyz
+        canonicalize_cell_auto, canonicalize_cell_true, do_cell_cif, do_cell_cp2k, do_cell_extxyz, &
+        do_cell_pdb, do_cell_xsc, do_coord_cif, do_coord_cp2k, do_coord_pdb, do_coord_xyz
    USE input_cp2k_subsys,               ONLY: create_cell_section
    USE input_enumeration_types,         ONLY: enum_i2c,&
                                               enumeration_type
@@ -46,7 +46,8 @@ MODULE cell_methods
         section_vals_val_unset
    USE kinds,                           ONLY: default_path_length,&
                                               default_string_length,&
-                                              dp
+                                              dp,&
+                                              max_line_length
    USE machine,                         ONLY: default_output_unit
    USE mathconstants,                   ONLY: degree,&
                                               sqrt3
@@ -64,13 +65,15 @@ MODULE cell_methods
    CHARACTER(len=*), PARAMETER, PRIVATE :: moduleN = 'cell_methods'
 
    PUBLIC :: cell_create, &
+             cell_finalize_canonical_input, &
              init_cell, &
              read_cell, &
              read_cell_cif, &
              read_cell_cp2k, &
-             read_cell_extxyz, &
+             read_cell_xyz, &
              read_cell_pdb, &
              read_cell_xsc, &
+             read_xyz_comment, &
              set_cell_param, &
              write_cell, &
              write_cell_low
@@ -104,11 +107,69 @@ CONTAINS
          cell%perd = 1
       END IF
       cell%orthorhombic = .FALSE.
+      cell%input_cell_canonicalized = .FALSE.
+      cell%input_hmat(:, :) = 0.0_dp
+      cell%input_to_canonical(:, :) = 0.0_dp
+      cell%input_recip_to_canonical(:, :) = 0.0_dp
       cell%symmetry_id = cell_sym_none
       IF (PRESENT(hmat)) CALL init_cell(cell, hmat)
       IF (PRESENT(tag)) cell%tag = tag
 
    END SUBROUTINE cell_create
+
+! **************************************************************************************************
+!> \brief Store the transform between the user input cell and the canonical cell.
+!> \param cell ...
+!> \param hmat_input ...
+!> \param hmat_canonical ...
+! **************************************************************************************************
+   SUBROUTINE cell_finalize_canonical_input(cell, hmat_input, hmat_canonical)
+
+      TYPE(cell_type), POINTER                           :: cell
+      REAL(KIND=dp), DIMENSION(3, 3), INTENT(IN)         :: hmat_input, hmat_canonical
+
+      REAL(KIND=dp), PARAMETER                           :: eps_hmat = 1.0E-12_dp
+
+      REAL(KIND=dp), DIMENSION(3, 3)                     :: tmat
+
+      CPASSERT(ASSOCIATED(cell))
+
+      IF (MAXVAL(ABS(hmat_canonical - hmat_input)) <= eps_hmat) THEN
+         cell%input_cell_canonicalized = .FALSE.
+         cell%input_hmat(:, :) = 0.0_dp
+         cell%input_to_canonical(:, :) = 0.0_dp
+         cell%input_recip_to_canonical(:, :) = 0.0_dp
+      ELSE
+         tmat = MATMUL(hmat_canonical, inv_3x3(hmat_input))
+         cell%input_cell_canonicalized = .TRUE.
+         cell%input_hmat(:, :) = hmat_input(:, :)
+         cell%input_to_canonical(:, :) = tmat(:, :)
+         cell%input_recip_to_canonical(:, :) = TRANSPOSE(inv_3x3(tmat))
+      END IF
+
+   END SUBROUTINE cell_finalize_canonical_input
+
+! **************************************************************************************************
+!> \brief Canonicalize a general cell matrix without changing lengths and angles.
+!> \param cell ...
+! **************************************************************************************************
+   SUBROUTINE canonicalize_cell_matrix(cell)
+
+      TYPE(cell_type), POINTER                           :: cell
+
+      REAL(KIND=dp), DIMENSION(3)                        :: abc, cell_angle
+
+      CPASSERT(ASSOCIATED(cell))
+
+      CALL get_cell(cell=cell, abc=abc)
+      cell_angle(1) = angle(cell%hmat(:, 2), cell%hmat(:, 3))
+      cell_angle(2) = angle(cell%hmat(:, 1), cell%hmat(:, 3))
+      cell_angle(3) = angle(cell%hmat(:, 1), cell%hmat(:, 2))
+
+      CALL set_cell_param(cell, cell_length=abc, cell_angle=cell_angle, &
+                          periodic=cell%perd, do_init_cell=.TRUE.)
+
+   END SUBROUTINE canonicalize_cell_matrix
 
 ! **************************************************************************************************
 !> \brief   Initialise/readjust a simulation cell after hmat has been changed
@@ -288,13 +349,14 @@ CONTAINS
 
       CHARACTER(LEN=default_path_length)                 :: cell_file_name, coord_file_name, &
                                                             error_msg
-      INTEGER                                            :: cell_file_format, coord_file_format, &
-                                                            my_per
+      INTEGER                                            :: canonicalize_mode, cell_file_format, &
+                                                            coord_file_format, my_per
       INTEGER, DIMENSION(:), POINTER                     :: multiple_unit_cell
-      LOGICAL :: cell_read_a, cell_read_abc, cell_read_alpha_beta_gamma, cell_read_b, cell_read_c, &
-         cell_read_file, my_check_ref, tmp_comb_abc, tmp_comb_cell, tmp_comb_top, topo_read_coord
+      LOGICAL :: canonicalize_cell, cell_read_a, cell_read_abc, cell_read_alpha_beta_gamma, &
+         cell_read_b, cell_read_c, cell_read_file, my_check_ref, tmp_comb_abc, tmp_comb_cell, &
+         tmp_comb_top, topo_read_coord
       REAL(KIND=dp), DIMENSION(3)                        :: read_ang, read_len
-      REAL(KIND=dp), DIMENSION(3, 3)                     :: read_mat
+      REAL(KIND=dp), DIMENSION(3, 3)                     :: hmat_input, read_mat
       REAL(KIND=dp), DIMENSION(:), POINTER               :: cell_par
       TYPE(cell_type), POINTER                           :: cell_tmp
       TYPE(section_vals_type), POINTER                   :: cell_ref_section
@@ -318,12 +380,17 @@ CONTAINS
       cell%symmetry_id = cell_sym_none
       cell%hmat(:, :) = 0.0_dp
       cell%h_inv(:, :) = 0.0_dp
+      cell%input_cell_canonicalized = .FALSE.
+      cell%input_hmat(:, :) = 0.0_dp
+      cell%input_to_canonical(:, :) = 0.0_dp
+      cell%input_recip_to_canonical(:, :) = 0.0_dp
       cell_read_file = .FALSE.
       cell_read_a = .FALSE.
       cell_read_b = .FALSE.
       cell_read_c = .FALSE.
       cell_read_abc = .FALSE.
       cell_read_alpha_beta_gamma = .FALSE.
+      hmat_input(:, :) = 0.0_dp
       read_mat(:, :) = 0.0_dp
       read_ang(:) = 0.0_dp
       read_len(:) = 0.0_dp
@@ -343,6 +410,8 @@ CONTAINS
       CALL section_vals_val_get(cell_section, "ABC", explicit=cell_read_abc)
       CALL section_vals_val_get(cell_section, "ALPHA_BETA_GAMMA", explicit=cell_read_alpha_beta_gamma)
       CALL section_vals_val_get(cell_section, "CELL_FILE_NAME", explicit=cell_read_file)
+      CALL section_vals_val_get(cell_section, "CANONICALIZE", i_val=canonicalize_mode)
+      canonicalize_cell = (canonicalize_mode == canonicalize_cell_true)
 
       ! Case 4
       tmp_comb_top = (.NOT. (cell_read_file .OR. cell_read_abc))
@@ -405,7 +474,7 @@ CONTAINS
          CASE (do_cell_xsc)
             CALL read_cell_xsc(cell_file_name, cell_tmp, para_env)
          CASE (do_cell_extxyz)
-            CALL read_cell_extxyz(cell_file_name, cell_tmp, para_env)
+            CALL read_cell_xyz(cell_file_name, cell_tmp, para_env)
          CASE (do_cell_pdb)
             CALL read_cell_pdb(cell_file_name, cell_tmp, para_env)
          CASE (do_cell_cif)
@@ -451,14 +520,25 @@ CONTAINS
       IF (ANY(read_mat(:, :) > eps)) THEN
          ! Make a warning before storing cell vectors that
          ! do not form a triangular matrix.
-         IF ((ABS(read_mat(2, 1)) > eps) .OR. &
-             (ABS(read_mat(3, 1)) > eps) .OR. &
-             (ABS(read_mat(3, 2)) > eps)) &
-            CALL cp_warn(__LOCATION__, &
-                         "Cell vectors are read but cell matrix is not "// &
-                         "a lower triangle, not conforming to the program "// &
-                         "convention that A lies along the X-axis and "// &
-                         "B is in the XY plane.")
+         IF (.NOT. canonicalize_cell .AND. &
+             ((ABS(read_mat(2, 1)) > eps) .OR. &
+              (ABS(read_mat(3, 1)) > eps) .OR. &
+              (ABS(read_mat(3, 2)) > eps))) THEN
+            IF (canonicalize_mode == canonicalize_cell_auto) THEN
+               CALL cp_warn(__LOCATION__, &
+                            "CELL%CANONICALIZE AUTO keeps the general input cell orientation. "// &
+                            "The cell matrix is not a lower triangle and does not conform to the "// &
+                            "program convention that A lies along the X-axis and B is in the XY plane. "// &
+                            "Set CELL%CANONICALIZE TRUE to explicitly transform the cell and supported "// &
+                            "cell-dependent input to the canonical internal frame.")
+            ELSE
+               CALL cp_warn(__LOCATION__, &
+                            "Cell vectors are read but cell matrix is not "// &
+                            "a lower triangle, not conforming to the program "// &
+                            "convention that A lies along the X-axis and "// &
+                            "B is in the XY plane.")
+            END IF
+         END IF
          cell%hmat = read_mat
       ELSE
          IF (ANY(read_ang(:) > eps) .AND. ANY(read_len(:) > eps)) THEN
@@ -495,16 +575,17 @@ CONTAINS
       CASE (use_perd_none)
          cell%perd = [0, 0, 0]
       CASE DEFAULT
-         CPABORT("")
+         CPABORT("Invalid or not yet implemented cell periodicity")
       END SELECT
 
       ! Load requested cell symmetry
       CALL section_vals_val_get(cell_section, "SYMMETRY", i_val=cell%symmetry_id)
       ! Try enforcing symmetry by initializing a temporary copy of cell
       ! and see if the resulting cell matrix differ significantly
+      hmat_input(:, :) = cell%hmat(:, :)
       CALL cell_clone(cell, cell_tmp)
       CALL init_cell(cell_tmp)
-      IF (ANY(ABS(cell_tmp%hmat - cell%hmat) > eps)) THEN
+      IF (.NOT. canonicalize_cell .AND. ANY(ABS(cell_tmp%hmat - cell%hmat) > eps)) THEN
          WRITE (UNIT=error_msg, FMT="(A)") &
             "When initializing cell vectors with requested symmetry, one "// &
             "or more elements of the cell matrix has varied significantly. "// &
@@ -514,8 +595,13 @@ CONTAINS
             "anyway with the input atomic coordinates."
          CALL cp_warn(__LOCATION__, error_msg)
       END IF
+      IF (canonicalize_cell) THEN
+         CALL canonicalize_cell_matrix(cell_tmp)
+         CALL cell_finalize_canonical_input(cell_tmp, hmat_input, cell_tmp%hmat)
+      END IF
       CALL cell_clone(cell_tmp, cell)
       CALL cell_release(cell_tmp)
+      CALL reset_cell_section_by_cell_mat(cell, cell_section)
 
       IF (my_check_ref) THEN
          ! Recursive check for reference cell requested
@@ -792,57 +878,279 @@ CONTAINS
    END SUBROUTINE cif_get_real
 
 ! **************************************************************************************************
-!> \brief  Reads cell information from comment line of extended xyz file
-!> \param extxyz_file_name ...
+!> \brief  Reads xyz file and pass comments on the second line to get cell information
+!> \param xyz_file_name ...
 !> \param cell ...
 !> \param para_env ...
-!> \date   03.2026
-!> \par    Extended xyz format has comment on the second line in the form as
-!>               Lattice="Ax Ay Az Bx By Bz Cx Cy Cz"
-!>         where Ax, Ay, Az are three Cartesian components of cell vector A,
-!>         Bx, By, Bz are components of B, Cx, Cy, Cz are components of C,
-!>         all in the unit of angstrom.
+!> \par    History
+!>         03.2026 - Created as read_cell_extxyz with extended XYZ parser
+!>         06.2026 - Refactored the parser to allow for reftraj use
+!> \author  HE Zilong
 ! **************************************************************************************************
-   SUBROUTINE read_cell_extxyz(extxyz_file_name, cell, para_env)
+   SUBROUTINE read_cell_xyz(xyz_file_name, cell, para_env)
 
-      CHARACTER(len=*)                                   :: extxyz_file_name
+      CHARACTER(len=*)                                   :: xyz_file_name
       TYPE(cell_type), POINTER                           :: cell
       TYPE(mp_para_env_type), POINTER                    :: para_env
 
-      CHARACTER(len=*), PARAMETER                        :: routineN = 'read_cell_extxyz'
+      CHARACTER(len=*), PARAMETER                        :: routineN = 'read_cell_xyz'
 
-      INTEGER                                            :: handle, i, id1, id2, j
-      REAL(KIND=dp), DIMENSION(3, 3)                     :: hmat
+      INTEGER                                            :: handle
+      LOGICAL                                            :: has_cell
       TYPE(cp_parser_type)                               :: parser
 
       CALL timeset(routineN, handle)
 
-      CALL parser_create(parser, extxyz_file_name, &
+      CALL parser_create(parser, xyz_file_name, &
                          para_env=para_env, apply_preprocessing=.FALSE.)
-      CALL parser_get_next_line(parser, 2)
-      CALL uppercase(parser%input_line)
-      id1 = INDEX(parser%input_line, "LATTICE=")
-      IF (id1 > 0) THEN
-         id2 = INDEX(parser%input_line(id1 + 9:), '"')
-         READ (parser%input_line(id1 + 9:id1 + id2 + 7), *) hmat(:, 1), hmat(:, 2), hmat(:, 3)
-         DO i = 1, 3
-            DO j = 1, 3
-               cell%hmat(j, i) = cp_unit_to_cp2k(hmat(j, i), "angstrom")
-            END DO
-         END DO
-
-      ELSE
+      CALL parser_get_next_line(parser, 2) ! Skip number of atoms
+      CALL read_xyz_comment(parser%input_line, cell, has_cell)
+      IF (.NOT. has_cell) THEN
          CALL cp_abort(__LOCATION__, &
-                       "The field (lattice=) was not found on comment line "// &
-                       "of XYZ file, so cell information cannot be set via "// &
-                       "extended XYZ specification! ")
+                       "The keyword CELL_FILE_FORMAT requested cell information "// &
+                       "from XYZ file, but it is not available from the file <"// &
+                       TRIM(ADJUSTL(xyz_file_name))//"> as CELL_FILE_NAME specified!")
       END IF
-
       CALL parser_release(parser)
-
       CALL timestop(handle)
 
-   END SUBROUTINE read_cell_extxyz
+   END SUBROUTINE read_cell_xyz
+
+! **************************************************************************************************
+!> \brief  Reads comment line of XYZ files to get cell, step, time and energy info
+!> \param line the single comment line of an XYZ file
+!> \param cell the pointer to which cell is written
+!> \param has_cell a flag for presence of cell information
+!> \param step an integer value for step number, if requested; HUGE(0) if not available
+!> \param time a real value for time, if requested; HUGE(0.0_dp) if not available
+!> \param ener a real value for energy, if requested; HUGE(0.0_dp) if not available
+!> \par    Intended for both the FORCE_EVAL/SUBSYS/CELL and MOTION/MD/REFTRAJ.
+!>         At minimum, should work with outputs from write_trajectory() in
+!>         src/motion_utils.F, around line 879 of src/motion/dumpdcd.F and
+!>         write_final_structure() in src/particle_methods.F (for cell only).
+!>         Recognized formats (case insensitive, no hard restriction on data width):
+!>         (1) Extended xyz format, whose comment on the second line contains fields:
+!>               Lattice="Ax Ay Az Bx By Bz Cx Cy Cz"
+!>             where Ax, Ay, Az are three Cartesian components of cell vector A,
+!>             Bx, By, Bz are components of B, Cx, Cy, Cz are components of C,
+!>             all in the unit of angstrom, and must occur;
+!>               Step=S
+!>             where S is the integer step number;
+!>               Time=T
+!>             where T is the time in femtoseconds;
+!>               Energy=E
+!>             where E is the energy.
+!>             No whitespace around the = sign is present; the whitespace is used as
+!>             the delimiter between fields; apart from lattice= at the front, other
+!>             fields are optional and do not have a fixed order.
+!>         (2) dumpdcd format, whose comment on the second line contains fields:
+!>               a = A, b = B, c = C, alpha = ALPHA, beta = BETA, gamma = GAMMA
+!>             where A, B, C are three lengths of cell vectors in angstrom, ALPHA,
+!>             BETA, GAMMA are three angles between cell vectors in degrees;
+!>               i = I,
+!>             where I is the integer step number;
+!>               time = T,
+!>             where T is the time in femtoseconds;
+!>               E = ENER,
+!>             where ENER is the energy.
+!>             There is one whitespace before and after each equal sign; the comma
+!>             is used as the delimiter between fields; the cell information is
+!>             optional.
+!>
+!>         History
+!>         06.2026 - Created by combining the extxyz parser from former read_cell_extxyz
+!>                   and the parser for reftraj in src/motion/integrator.F
+!> \author  HE Zilong
+! **************************************************************************************************
+   SUBROUTINE read_xyz_comment(line, cell, has_cell, step, time, ener)
+
+      CHARACTER(LEN=*), INTENT(IN)                       :: line
+      TYPE(cell_type), INTENT(INOUT), POINTER            :: cell
+      LOGICAL, INTENT(OUT)                               :: has_cell
+      INTEGER, INTENT(OUT), OPTIONAL                     :: step
+      REAL(KIND=dp), INTENT(OUT), OPTIONAL               :: time, ener
+
+      CHARACTER(LEN=3)                                   :: abc
+      CHARACTER(LEN=max_line_length)                     :: my_line, raw_str
+      INTEGER                                            :: i, id1, id2, ios, j, my_step
+      REAL(KIND=dp)                                      :: my_ener, my_time
+      REAL(KIND=dp), DIMENSION(3)                        :: my_abc, my_albega
+      REAL(KIND=dp), DIMENSION(3, 3)                     :: my_hmat
+
+      has_cell = .FALSE.
+      my_step = HUGE(0)
+      my_time = HUGE(0.0_dp)
+      my_ener = HUGE(0.0_dp)
+      my_hmat = 0.0_dp
+      my_abc = 0.0_dp
+      my_albega = 0.0_dp
+
+      my_line = line
+      CALL uppercase(my_line)
+      id1 = INDEX(my_line, "LATTICE=")
+      IF (id1 > 0) THEN ! Extended XYZ
+         id2 = INDEX(my_line(id1 + 9:), '"') ! Strip 'LATTICE="' and find the next quote
+         READ (my_line(id1 + 9:id1 + id2 + 7), '(A)') raw_str
+         READ (raw_str, *, IOSTAT=ios) my_hmat(:, 1), my_hmat(:, 2), my_hmat(:, 3)
+         IF (ios /= 0) THEN
+            CALL cp_abort(__LOCATION__, "Error while parsing input line for cell vectors as "// &
+                          "extended XYZ format: expected 9 real values in the <lattice=> "// &
+                          "quoted field, found <"//TRIM(raw_str)//"> which is invalid!")
+         ELSE
+            has_cell = .TRUE.
+            DO i = 1, 3
+               DO j = 1, 3
+                  cell%hmat(j, i) = cp_unit_to_cp2k(my_hmat(j, i), "angstrom")
+               END DO
+            END DO
+         END IF
+         IF (PRESENT(step)) THEN
+            id1 = INDEX(my_line, "STEP=")
+            IF (id1 > 0) THEN
+               READ (my_line(id1 + 5:), '(A)') raw_str
+               READ (raw_str, *, IOSTAT=ios) my_step
+               IF (ios /= 0) THEN
+                  CALL cp_abort(__LOCATION__, &
+                                "Error while parsing input line for step as extended "// &
+                                "XYZ format: expected 1 integer value in the <step=> "// &
+                                "field, found <"//TRIM(raw_str)//"> which is invalid!")
+               END IF
+            END IF
+            step = my_step
+         END IF
+         IF (PRESENT(time)) THEN
+            id1 = INDEX(my_line, "TIME=")
+            IF (id1 > 0) THEN
+               READ (my_line(id1 + 5:), '(A)') raw_str
+               READ (raw_str, *, IOSTAT=ios) my_time
+               IF (ios /= 0) THEN
+                  CALL cp_abort(__LOCATION__, &
+                                "Error while parsing input line for time as extended "// &
+                                "XYZ format: expected 1 real value in the <time=> "// &
+                                "field, found <"//TRIM(raw_str)//"> which is invalid!")
+               END IF
+            END IF
+            time = my_time
+         END IF
+         IF (PRESENT(ener)) THEN
+            id1 = INDEX(my_line, "ENERGY=")
+            IF (id1 > 0) THEN
+               READ (my_line(id1 + 7:), '(A)') raw_str
+               READ (raw_str, *, IOSTAT=ios) my_ener
+               IF (ios /= 0) THEN
+                  CALL cp_abort(__LOCATION__, &
+                                "Error while parsing input line for energy as extended "// &
+                                "XYZ format: expected 1 real value in the <energy=> "// &
+                                "field, found <"//TRIM(raw_str)//"> which is invalid!")
+               END IF
+            END IF
+            ener = my_ener
+         END IF
+      ELSE ! May or may not be dumpdcd format, and may or may not has cell
+         abc = "ABC"
+         DO i = 1, 3
+            id1 = INDEX(my_line, " "//abc(i:i)//" = ")
+            IF (id1 > 0) THEN
+               READ (my_line(id1 + 5:), '(A)') raw_str
+               READ (raw_str, *, IOSTAT=ios) my_abc(i)
+               IF (ios /= 0) THEN
+                  CALL cp_abort(__LOCATION__, &
+                                "Error while parsing input line for cell vector as dumpdcd "// &
+                                "XYZ format: expected 1 real value in the <"//abc(i:i)//" = > "// &
+                                "field, found <"//TRIM(raw_str)//"> which is invalid!")
+               ELSE
+                  my_abc(i) = cp_unit_to_cp2k(my_abc(i), "angstrom")
+               END IF
+            END IF
+         END DO
+         id1 = INDEX(my_line, " ALPHA = ")
+         IF (id1 > 0) THEN
+            READ (my_line(id1 + 9:), '(A)') raw_str
+            READ (raw_str, *, IOSTAT=ios) my_albega(1)
+            IF (ios /= 0) THEN
+               CALL cp_abort(__LOCATION__, &
+                             "Error while parsing input line for cell angle alpha as dumpdcd "// &
+                             "XYZ format: expected 1 real value in the <alpha = > "// &
+                             "field, found <"//TRIM(raw_str)//"> which is invalid!")
+            ELSE
+               my_albega(1) = cp_unit_to_cp2k(my_albega(1), "deg")
+            END IF
+         END IF
+         id1 = INDEX(my_line, " BETA = ")
+         IF (id1 > 0) THEN
+            READ (my_line(id1 + 8:), '(A)') raw_str
+            READ (raw_str, *, IOSTAT=ios) my_albega(2)
+            IF (ios /= 0) THEN
+               CALL cp_abort(__LOCATION__, &
+                             "Error while parsing input line for cell angle beta as dumpdcd "// &
+                             "XYZ format: expected 1 real value in the <beta = > "// &
+                             "field, found <"//TRIM(raw_str)//"> which is invalid!")
+            ELSE
+               my_albega(2) = cp_unit_to_cp2k(my_albega(2), "deg")
+            END IF
+         END IF
+         id1 = INDEX(my_line, " GAMMA = ")
+         IF (id1 > 0) THEN
+            READ (my_line(id1 + 9:), '(A)') raw_str
+            READ (raw_str, *, IOSTAT=ios) my_albega(3)
+            IF (ios /= 0) THEN
+               CALL cp_abort(__LOCATION__, &
+                             "Error while parsing input line for cell angle gamma as dumpdcd "// &
+                             "XYZ format: expected 1 real value in the <gamma = > "// &
+                             "field, found <"//TRIM(raw_str)//"> which is invalid!")
+            ELSE
+               my_albega(3) = cp_unit_to_cp2k(my_albega(3), "deg")
+            END IF
+         END IF
+         IF (ALL(my_abc(1:3) > 0.0_dp) .AND. ALL(my_albega(1:3) > 0.0_dp)) THEN
+            has_cell = .TRUE.
+            CALL set_cell_param(cell, my_abc, my_albega, do_init_cell=.FALSE.)
+         END IF
+         IF (PRESENT(step)) THEN
+            id1 = INDEX(my_line, " I = ")
+            IF (id1 > 0) THEN
+               READ (my_line(id1 + 5:), '(A)') raw_str
+               READ (raw_str, *, IOSTAT=ios) my_step
+               IF (ios /= 0) THEN
+                  CALL cp_abort(__LOCATION__, &
+                                "Error while parsing input line for step as dumpdcd "// &
+                                "XYZ format: expected 1 integer value in the <i = > "// &
+                                "field, found <"//TRIM(raw_str)//"> which is invalid!")
+               END IF
+            END IF
+            step = my_step
+         END IF
+         IF (PRESENT(time)) THEN
+            id1 = INDEX(my_line, " TIME = ")
+            IF (id1 > 0) THEN
+               READ (my_line(id1 + 8:), '(A)') raw_str
+               READ (raw_str, *, IOSTAT=ios) my_time
+               IF (ios /= 0) THEN
+                  CALL cp_abort(__LOCATION__, &
+                                "Error while parsing input line for time as dumpdcd "// &
+                                "XYZ format: expected 1 real value in the <time = > "// &
+                                "field, found <"//TRIM(raw_str)//"> which is invalid!")
+               END IF
+            END IF
+            time = my_time
+         END IF
+         IF (PRESENT(ener)) THEN
+            id1 = INDEX(my_line, " E = ")
+            IF (id1 > 0) THEN
+               READ (my_line(id1 + 5:), '(A)') raw_str
+               READ (raw_str, *, IOSTAT=ios) my_ener
+               IF (ios /= 0) THEN
+                  CALL cp_abort(__LOCATION__, &
+                                "Error while parsing input line for energy as dumpdcd "// &
+                                "XYZ format: expected 1 real value in the <E = > "// &
+                                "field, found <"//TRIM(raw_str)//"> which is invalid!")
+               END IF
+            END IF
+            ener = my_ener
+         END IF
+      END IF
+
+   END SUBROUTINE read_xyz_comment
 
 ! **************************************************************************************************
 !> \brief  Reads cell information from CRYST1 record of PDB file
@@ -871,7 +1179,7 @@ CONTAINS
       CHARACTER(len=*), PARAMETER                        :: routineN = 'read_cell_pdb'
 
       CHARACTER(LEN=default_string_length)               :: cryst
-      INTEGER                                            :: handle, i
+      INTEGER                                            :: handle, i, ios
       INTEGER, DIMENSION(3)                              :: periodic
       LOGICAL                                            :: found
       REAL(KIND=dp), DIMENSION(3)                        :: cell_angles, cell_lengths
@@ -885,10 +1193,15 @@ CONTAINS
       CALL parser_search_string(parser, "CRYST1", ignore_case=.FALSE., found=found, &
                                 begin_line=.TRUE., search_from_begin_of_file=.TRUE.)
       IF (.NOT. found) &
-         CPABORT("The field (CRYST1) was not found in PDB file! ")
+         CPABORT("The line <CRYST1> was not found in PDB file! ")
 
       periodic = 1
-      READ (parser%input_line, *) cryst, cell_lengths(:), cell_angles(:)
+      READ (parser%input_line, *, IOSTAT=ios) cryst, cell_lengths(:), cell_angles(:)
+      IF (ios /= 0) THEN
+         CALL cp_abort(__LOCATION__, "Error while parsing PDB file "// &
+                       "<"//TRIM(pdb_file_name)//"> for cell lengths and angles: "// &
+                       "found CRYST1 line as <"//TRIM(parser%input_line)//">")
+      END IF
       DO i = 1, 3
          cell_lengths(i) = cp_unit_to_cp2k(cell_lengths(i), "angstrom")
          cell_angles(i) = cp_unit_to_cp2k(cell_angles(i), "deg")

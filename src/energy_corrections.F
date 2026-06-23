@@ -241,6 +241,7 @@ CONTAINS
 
       INTEGER                                            :: handle, unit_nr
       LOGICAL                                            :: my_calc_forces
+      TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(energy_correction_type), POINTER              :: ec_env
       TYPE(qs_energy_type), POINTER                      :: energy
       TYPE(qs_force_type), DIMENSION(:), POINTER         :: ks_force
@@ -248,7 +249,12 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      unit_nr = cp_logger_get_default_unit_nr(local=.FALSE.)
+      logger => cp_get_default_logger()
+      IF (logger%para_env%is_source()) THEN
+         unit_nr = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+      ELSE
+         unit_nr = -1
+      END IF
 
       CALL cite_reference(Belleflamme2023)
 
@@ -371,7 +377,8 @@ CONTAINS
                                ec_env%vxc_rspace, &
                                ec_env%vtau_rspace, &
                                ec_env%vadmm_rspace, &
-                               ec_env%ehartree, exc)
+                               ec_env%ehartree, exc, &
+                               vadmm_tau_rspace=ec_env%vadmm_tau_rspace)
          CALL ks_ref_potential_atom(qs_env, ec_env%local_rho_set, &
                                     ec_env%local_rho_set_admm, ec_env%vh_rspace)
 
@@ -520,6 +527,7 @@ CONTAINS
                              vxc_rspace=ec_env%vxc_rspace, &
                              vtau_rspace=ec_env%vtau_rspace, &
                              vadmm_rspace=ec_env%vadmm_rspace, &
+                             vadmm_tau_rspace=ec_env%vadmm_tau_rspace, &
                              matrix_hz=ec_env%matrix_hz, &
                              matrix_pz=ec_env%matrix_z, &
                              matrix_pz_admm=ec_env%z_admm, &
@@ -846,6 +854,7 @@ CONTAINS
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cell_type), POINTER                           :: cell
+      TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_s, scrm
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_p
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -876,7 +885,12 @@ CONTAINS
       debug_forces = ec_env%debug_forces
       debug_stress = ec_env%debug_stress
 
-      iounit = cp_logger_get_default_unit_nr(local=.FALSE.)
+      logger => cp_get_default_logger()
+      IF (logger%para_env%is_source()) THEN
+         iounit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+      ELSE
+         iounit = -1
+      END IF
 
       NULLIFY (atomic_kind_set, cell, dft_control, force, ks_env, &
                matrix_p, matrix_s, para_env, pw_env, rho, sab_orb, virial)
@@ -1620,6 +1634,7 @@ CONTAINS
                                                             evhxc, exc1, t3
       TYPE(admm_type), POINTER                           :: admm_env
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
+      TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: ks_mat, ps_mat
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: rho_ao_kp
       TYPE(dbcsr_type), POINTER                          :: smat
@@ -1642,7 +1657,12 @@ CONTAINS
 
       CALL timeset(routineN, handle)
 
-      iounit = cp_logger_get_default_unit_nr(local=.FALSE.)
+      logger => cp_get_default_logger()
+      IF (logger%para_env%is_source()) THEN
+         iounit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+      ELSE
+         iounit = -1
+      END IF
 
       ! get all information on the electronic density
       NULLIFY (auxbas_pw_pool, dft_control, energy, ks_env, rho, rho_r, tau_r)
@@ -1923,6 +1943,7 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(3)                        :: fodeb
       REAL(KIND=dp), DIMENSION(3, 3)                     :: stdeb, sttot
       TYPE(cell_type), POINTER                           :: cell
+      TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: scrm
       TYPE(dft_control_type), POINTER                    :: dft_control
       TYPE(mp_para_env_type), POINTER                    :: para_env
@@ -1937,7 +1958,12 @@ CONTAINS
       debug_forces = ec_env%debug_forces
       debug_stress = ec_env%debug_stress
 
-      iounit = cp_logger_get_default_unit_nr(local=.FALSE.)
+      logger => cp_get_default_logger()
+      IF (logger%para_env%is_source()) THEN
+         iounit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+      ELSE
+         iounit = -1
+      END IF
 
       calculate_forces = .TRUE.
 
@@ -2075,6 +2101,7 @@ CONTAINS
       REAL(KIND=dp), DIMENSION(3, 3)                     :: h_stress, pv_loc, stdeb, sttot
       TYPE(atomic_kind_type), DIMENSION(:), POINTER      :: atomic_kind_set
       TYPE(cell_type), POINTER                           :: cell
+      TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dbcsr_p_type), DIMENSION(:), POINTER          :: matrix_ks, rho_ao, scrmat
       TYPE(dbcsr_p_type), DIMENSION(:, :), POINTER       :: matrix_p, matrix_s, scrm
       TYPE(dft_control_type), POINTER                    :: dft_control
@@ -2103,7 +2130,12 @@ CONTAINS
       debug_forces = ec_env%debug_forces
       debug_stress = ec_env%debug_stress
 
-      iounit = cp_logger_get_default_unit_nr(local=.FALSE.)
+      logger => cp_get_default_logger()
+      IF (logger%para_env%is_source()) THEN
+         iounit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+      ELSE
+         iounit = -1
+      END IF
 
       ! get all information on the electronic density
       NULLIFY (atomic_kind_set, cell, dft_control, force, ks_env, &
@@ -3333,7 +3365,11 @@ CONTAINS
       rlab(3) = "Z"
 
       logger => cp_get_default_logger()
-      iounit = cp_logger_get_default_unit_nr(logger, local=.FALSE.)
+      IF (logger%para_env%is_source()) THEN
+         iounit = cp_logger_get_default_unit_nr(logger, local=.TRUE.)
+      ELSE
+         iounit = -1
+      END IF
 
       NULLIFY (dft_control)
       CALL get_qs_env(qs_env, dft_control=dft_control)
@@ -3854,6 +3890,7 @@ CONTAINS
                                    vxc_rspace=ec_env%vxc_rspace, &
                                    vtau_rspace=ec_env%vtau_rspace, &
                                    vadmm_rspace=ec_env%vadmm_rspace, &
+                                   vadmm_tau_rspace=ec_env%vadmm_tau_rspace, &
                                    matrix_hz=ec_env%matrix_hz, &
                                    matrix_pz=ec_env%matrix_z, &
                                    matrix_pz_admm=ec_env%z_admm, &
@@ -4073,4 +4110,3 @@ CONTAINS
    END SUBROUTINE get_t2cindex
 
 END MODULE energy_corrections
-

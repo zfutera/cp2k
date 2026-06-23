@@ -6,8 +6,8 @@
 [ "${BASH_SOURCE[0]}" ] && SCRIPT_NAME="${BASH_SOURCE[0]}" || SCRIPT_NAME=$0
 SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_NAME")/.." && pwd -P)"
 
-openblas_ver="0.3.32" # Keep in sync with get_openblas_arch.sh
-openblas_sha256="f8a1138e01fddca9e4c29f9684fd570ba39dedc9ca76055e1425d5d4b1a4a766"
+openblas_ver="0.3.33" # Keep in sync with get_openblas_arch.sh
+openblas_sha256="6761af1d9f5d353ab4f0b7497be2643313b36c8f31caec0144bfef198e71e6ab"
 openblas_pkg="OpenBLAS-${openblas_ver}.tar.gz"
 
 source "${SCRIPT_DIR}"/common_vars.sh
@@ -65,7 +65,9 @@ case "${with_openblas}" in
           FC="${FC}" \
           PREFIX="${pkg_install_dir}" \
           > make.${OPENBLAS_LIBCORE}.log 2>&1; then
-          tail_excerpt make.${OPENBLAS_LIBCORE}.log
+          # If failed, fallback to the dynamic-arch build
+          # Not using tail_excerpt because it exits with 1
+          tail -v -n "${LOG_LINES}" make.${OPENBLAS_LIBCORE}.log
           BUILD_DYNAMIC=1
         fi
       fi

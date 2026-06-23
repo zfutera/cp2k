@@ -16,8 +16,8 @@ MODULE input_cp2k_dft
                                               basis_sort_zet
    USE bibliography,                    ONLY: &
         Andermatt2016, Andreussi2012, Avezac2005, Bengtsson1999, Blochl1995, Brelaz1979, &
-        Fattebert2002, Guidon2010, Iannuzzi2006, Kunert2003, Marek2025, Merlot2014, Perdew1981, &
-        VandeVondele2005b, Yin2017
+        Chai2024a, Fattebert2002, Guidon2010, Iannuzzi2006, Kunert2003, Marek2025, Merlot2014, &
+        Perdew1981, VandeVondele2005b, Yin2017
    USE cp_output_handling,              ONLY: add_last_numeric,&
                                               cp_print_key_section_create,&
                                               high_print_level,&
@@ -126,12 +126,14 @@ CONTAINS
 
       CPASSERT(.NOT. ASSOCIATED(section))
       CALL section_create(section, __LOCATION__, name="DFT", &
-                          description="Parameter needed by LCAO DFT programs", &
+                          description="Controls electronic-structure settings for Quickstep and related "// &
+                          "Gaussian-basis DFT methods.", &
                           n_keywords=3, n_subsections=4, repeats=.FALSE.)
 
       NULLIFY (keyword)
       CALL keyword_create(keyword, __LOCATION__, name="BASIS_SET_FILE_NAME", &
-                          description="Name of the basis set file, may include a path", &
+                          description="Name of a basis-set library file, optionally including a path. "// &
+                          "This keyword can be repeated to search several basis-set files.", &
                           usage="BASIS_SET_FILE_NAME <FILENAME>", &
                           type_of_var=lchar_t, repeats=.TRUE., &
                           default_lc_val="BASIS_SET", n_var=1)
@@ -139,7 +141,8 @@ CONTAINS
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="POTENTIAL_FILE_NAME", &
-                          description="Name of the pseudo potential file, may include a path", &
+                          description="Name of the pseudopotential library file, optionally including a path. "// &
+                          "The potential selected for each kind is set with KIND%POTENTIAL.", &
                           usage="POTENTIAL_FILE_NAME <FILENAME>", &
                           default_lc_val="POTENTIAL")
       CALL section_add_keyword(section, keyword)
@@ -319,7 +322,8 @@ CONTAINS
 
       CALL keyword_create(keyword, __LOCATION__, &
                           name="SORT_BASIS", &
-                          description="Sort basis sets according to a certain criterion. ", &
+                          description="Sorts basis functions according to a selected criterion. "// &
+                          "Sorting by exponent can improve data locality for selected exact-exchange and RI workflows.", &
                           enum_c_vals=s2a("DEFAULT", "EXP"), &
                           enum_i_vals=[basis_sort_default, basis_sort_zet], &
                           enum_desc=s2a("don't sort", "sort w.r.t. exponent"), &
@@ -463,6 +467,14 @@ CONTAINS
       CALL section_release(subsection)
 
       CALL create_hairy_probes_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
+      CALL create_pcc_section(subsection)
+      CALL section_add_subsection(section, subsection)
+      CALL section_release(subsection)
+
+      CALL create_paep_section(subsection)
       CALL section_add_subsection(section, subsection)
       CALL section_release(subsection)
 
@@ -672,15 +684,16 @@ CONTAINS
       NULLIFY (keyword)
       CPASSERT(.NOT. ASSOCIATED(section))
       CALL section_create(section, __LOCATION__, name="AUXILIARY_DENSITY_MATRIX_METHOD", &
-                          description="Parameters needed for the ADMM method.", &
+                          description="Controls the auxiliary density matrix method (ADMM), which evaluates "// &
+                          "Hartree-Fock exchange on a smaller auxiliary basis and adds an exchange correction.", &
                           n_keywords=1, n_subsections=1, repeats=.FALSE., &
                           citations=[Guidon2010])
 
       CALL keyword_create( &
          keyword, __LOCATION__, &
          name="ADMM_TYPE", &
-         description="Type of ADMM (sort name) as refered in literature. "// &
-         "This sets values for METHOD, ADMM_PURIFICATION_METHOD, and EXCH_SCALING_MODEL", &
+         description="Named ADMM variant from the literature. This shortcut sets METHOD, "// &
+         "ADMM_PURIFICATION_METHOD, and EXCH_SCALING_MODEL consistently for the selected variant.", &
          enum_c_vals=s2a("NONE", "ADMM1", "ADMM2", "ADMMS", "ADMMP", "ADMMQ"), &
          enum_desc=s2a("No short name is used, use specific definitions (default)", &
                        "ADMM1 method from Guidon2010", &
@@ -745,8 +758,8 @@ CONTAINS
       CALL keyword_create( &
          keyword, __LOCATION__, &
          name="EXCH_CORRECTION_FUNC", &
-         description="Exchange functional which is used for the ADMM correction. "// &
-         "LibXC implementations require linking with LibXC", &
+         description="Exchange functional used for the ADMM correction. It should be chosen consistently "// &
+         "with the exchange functional in the main XC setup. LibXC implementations require linking with LibXC.", &
          enum_c_vals=s2a("DEFAULT", "PBEX", "NONE", "OPTX", "BECKE88X", &
                          "PBEX_LIBXC", "BECKE88X_LIBXC", "OPTX_LIBXC", "DEFAULT_LIBXC", "LDA_X_LIBXC"), &
          enum_i_vals=[do_admm_aux_exch_func_default, do_admm_aux_exch_func_pbex, &
@@ -1230,26 +1243,32 @@ CONTAINS
 
       CPASSERT(.NOT. ASSOCIATED(section))
       CALL section_create(section, __LOCATION__, name="mgrid", &
-                          description="multigrid information", &
+                          description="Controls the multigrid used by GPW/GAPW to represent densities, "// &
+                          "potentials, and Gaussian products on real-space grids.", &
                           n_keywords=5, n_subsections=1, repeats=.FALSE.)
       NULLIFY (keyword)
       CALL keyword_create(keyword, __LOCATION__, name="NGRIDS", &
-                          description="The number of multigrids to use", &
+                          description="Number of multigrid levels. Smooth Gaussian products can be mapped to "// &
+                          "coarser levels, while sharper products require finer levels.", &
                           usage="ngrids 1", default_i_val=4)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="cutoff", &
-                          description="The cutoff of the finest grid level. Default value for "// &
-                          "SE or DFTB calculation is 1.0 [Ry].", &
-                          usage="cutoff 300", default_r_val=cp_unit_to_cp2k(value=280.0_dp, &
-                                                                            unit_str="Ry"), n_var=1, unit_str="Ry")
+                          description= &
+                          "Plane-wave cutoff of the finest real-space grid level. "// &
+                          "Increasing this value improves the grid representation, but it is "// &
+                          "not a substitute for converging the Gaussian basis set. "// &
+                          "Default value for SE or DFTB calculation is 1.0 [Ry].", &
+                          usage="cutoff 300", &
+                          default_r_val=cp_unit_to_cp2k(value=280.0_dp, unit_str="Ry"), &
+                          n_var=1, unit_str="Ry")
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
       CALL keyword_create(keyword, __LOCATION__, name="progression_factor", &
-                          description="Factor used to find the cutoff of the multigrids that"// &
-                          " where not given explicitly", &
+                          description="Factor used to derive the cutoff of coarser multigrid levels when "// &
+                          "they are not given explicitly.", &
                           usage="progression_factor <integer>", default_r_val=3._dp)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
@@ -1271,11 +1290,10 @@ CONTAINS
 
       CALL keyword_create(keyword, __LOCATION__, name="REL_CUTOFF", &
                           variants=["RELATIVE_CUTOFF"], &
-                          description="Determines the grid at which a Gaussian is mapped,"// &
-                          " giving the cutoff used for a gaussian with alpha=1."// &
-                          " A value 50+-10Ry might be required for highly accurate results,"// &
-                          " Or for simulations with a variable cell."// &
-                          " Versions prior to 2.3 used a default of 30Ry.", &
+                          description="Controls to which multigrid level a Gaussian product is mapped. "// &
+                          "It is the reference cutoff for a Gaussian with exponent alpha=1. Larger values "// &
+                          "keep more Gaussian products on finer grids and can be important for accurate "// &
+                          "energies, forces, stress tensors, and variable-cell simulations.", &
                           usage="RELATIVE_CUTOFF real", default_r_val=20.0_dp, &
                           unit_str="Ry")
       CALL section_add_keyword(section, keyword)
@@ -1727,6 +1745,13 @@ CONTAINS
                           " and not for restarts (RT_RESTART).", &
                           usage="PERIODIC", &
                           default_l_val=.TRUE., lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="LOCALIZE", &
+                          description="Localise the Molecular orbitals each n steps "// &
+                          "real-time propagated TDDFT, 0 means never localise", &
+                          usage="LOCALIZE", default_i_val=0)
       CALL section_add_keyword(section, keyword)
       CALL keyword_release(keyword)
 
@@ -2397,5 +2422,119 @@ CONTAINS
       CALL section_release(subsection)
 
    END SUBROUTINE create_sccs_section
+
+! **************************************************************************************************
+!> \brief      Create CP2K input section for the planar counter charge density
+!> \param section ...
+!> \author     Ziwei Chai
+!> \version    1.0
+! **************************************************************************************************
+   SUBROUTINE create_pcc_section(section)
+
+      TYPE(section_type), POINTER                        :: section
+
+      TYPE(keyword_type), POINTER                        :: keyword
+
+      CPASSERT(.NOT. ASSOCIATED(section))
+
+      CALL section_create(section, __LOCATION__, &
+                          name="PLANAR_COUNTER_CHARGE", &
+                          description="Define the parameters for the planar counter charge density", &
+                          citations=[Chai2024a], &
+                          n_keywords=4, &
+                          n_subsections=0, &
+                          repeats=.FALSE.)
+
+      NULLIFY (keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, &
+                          name="_SECTION_PARAMETERS_", &
+                          description="Controls the activation of the planar counter charge section", &
+                          usage="&PLANAR_COUNTER_CHARGE ON", &
+                          default_l_val=.FALSE., &
+                          lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="PARALLEL_PLANE", &
+                          enum_c_vals=s2a('XY', 'YZ', 'XZ'), &
+                          enum_i_vals=[3, 1, 2], &
+                          description="The coordinate plane that the surface is parallel to.", &
+                          enum_desc=s2a("Parallel to XY", "Parallel to YZ", "Parallel to XZ"), &
+                          n_var=1, &
+                          default_i_val=3, &
+                          usage="PARALLEL_PLANE XY")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, &
+                          name="DIST_EDGE", &
+                          description="Controls the distance between the center of the Gaussian "// &
+                          "and the cell boundary", &
+                          usage="DIST_EDGE 1.0", &
+                          unit_str="angstrom", &
+                          type_of_var=real_t)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, &
+                          name="GAU_C", &
+                          description="Controls the spread of the Gaussian distribution", &
+                          usage="GAU_C 0.1", &
+                          unit_str="angstrom", &
+                          type_of_var=real_t)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+   END SUBROUTINE create_pcc_section
+
+! **************************************************************************************************
+!> \brief      Create CP2K input section for calculating and printing the planar averaged
+!>             electrostatic potential (Hartree potential) for symmetric slab systems
+!> \param section ...
+!> \author     Ziwei Chai
+!> \version    1.0
+! **************************************************************************************************
+   SUBROUTINE create_paep_section(section)
+
+      TYPE(section_type), POINTER                        :: section
+
+      TYPE(keyword_type), POINTER                        :: keyword
+
+      CPASSERT(.NOT. ASSOCIATED(section))
+
+      CALL section_create(section, __LOCATION__, &
+                          name="PLANAR_AVERAGED_V_HARTREE", &
+                          description="Define the parameters for calculating and printing the planar "// &
+                          "averaged electrostatic potential (Hartree potential) "// &
+                          "for symmetric slab systems", &
+                          n_keywords=2, &
+                          n_subsections=0, &
+                          repeats=.FALSE.)
+
+      NULLIFY (keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, &
+                          name="_SECTION_PARAMETERS_", &
+                          description="Controls the activation of the planar averaged electrostatic "// &
+                          "potential (Hartree potential) section", &
+                          usage="&PLANAR_AVERAGED_V_HARTREE ON", &
+                          default_l_val=.FALSE., &
+                          lone_keyword_l_val=.TRUE.)
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+      CALL keyword_create(keyword, __LOCATION__, name="PARALLEL_PLANE", &
+                          enum_c_vals=s2a('XY', 'YZ', 'XZ'), &
+                          enum_i_vals=[3, 1, 2], &
+                          description="The coordinate plane that the surface is parallel to.", &
+                          enum_desc=s2a("Parallel to XY", "Parallel to YZ", "Parallel to XZ"), &
+                          n_var=1, &
+                          default_i_val=3, &
+                          usage="PARALLEL_PLANE XY")
+      CALL section_add_keyword(section, keyword)
+      CALL keyword_release(keyword)
+
+   END SUBROUTINE create_paep_section
 
 END MODULE input_cp2k_dft

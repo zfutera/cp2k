@@ -6,7 +6,7 @@
 # Author: Matthias Krack (MK)
 #
 
-ARG BASE_IMAGE=${BASE_IMAGE:-ubuntu:24.04}
+ARG BASE_IMAGE=${BASE_IMAGE:-ubuntu:26.04}
 ARG DEPS_IMAGE=${DEPS_IMAGE:-}
 
 ###### Stage 2: Build CP2K ######
@@ -24,9 +24,13 @@ ENV NUM_PROCS=${NUM_PROCS:-32}
 ARG FEATURE_FLAGS
 ENV FEATURE_FLAGS=${FEATURE_FLAGS:-}
 
-# Build CP2K
+# Update CP2K files
 WORKDIR /opt/cp2k
-RUN ./make_cp2k.sh -cray -cv ${CP2K_VERSION} -dlc -j${NUM_PROCS} ${FEATURE_FLAGS}
+RUN rm -rf benchmarks cmake data src tests tools
+COPY . .
+
+# Build CP2K
+RUN ./make_cp2k.sh -cray -cv ${CP2K_VERSION} -uc no -j${NUM_PROCS} ${FEATURE_FLAGS}
 
 ###### Stage 3: Install CP2K ######
 
