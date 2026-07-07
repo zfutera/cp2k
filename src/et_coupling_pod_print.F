@@ -304,14 +304,14 @@ CONTAINS
       INTEGER                                            :: i, j, k, l, id, handle
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(section_vals_type), POINTER                   :: et_proj_sec, print_key
-#if defined(__SCALAPACK)
+#if defined(__parallel)
       REAL(KIND=dp), DIMENSION(:, :), POINTER            :: d1, d2
 #endif
 
       ! Time mark
       CALL timeset(routineN, handle)
 
-#if defined(__SCALAPACK)
+#if defined(__parallel)
       NULLIFY (d1)
       NULLIFY (d2)
 #endif
@@ -345,7 +345,7 @@ CONTAINS
          IF (output_unit > 0) &
             WRITE (output_unit, '(/,T3,A/)') 'Coupling elements [meV]:'
 
-#if defined(__SCALAPACK)
+#if defined(__parallel)
 
          DO i = 1, ec%n_blocks
             id = 1

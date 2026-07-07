@@ -172,10 +172,8 @@ CONTAINS
 
       ! Local variables
       INTEGER                                            :: ir, ic, jr, jc, nr, nc, handle
-      TYPE(cp_blacs_env_type), POINTER                   :: blacs_env
       TYPE(cp_fm_type)                                   :: mat_w
-      TYPE(mp_para_env_type), POINTER                    :: para_env
-#if defined(__SCALAPACK)
+#if defined(__parallel)
       INTEGER                                            :: is_p_row, is_p_col
       INTEGER                                            :: iu_p_row, iu_p_col
       INTEGER                                            :: ns_p_rows, ns_p_cols
@@ -188,7 +186,9 @@ CONTAINS
       ! Time mark
       CALL timeset(routineN, handle)
 
-#if defined(__SCALAPACK)
+      CPASSERT(ASSOCIATED(mo%mo_coeff))
+
+#if defined(__parallel)
       ! number of processors
       ns_p_rows = mo%mo_coeff%matrix_struct%context%num_pe(1)
       ns_p_cols = mo%mo_coeff%matrix_struct%context%num_pe(2)
@@ -201,9 +201,6 @@ CONTAINS
       cu_row = mat_u%matrix_struct%context%mepos(1)
       cu_col = mat_u%matrix_struct%context%mepos(2)
 #endif
-
-      NULLIFY (blacs_env)
-      NULLIFY (para_env)
 
       ! Working matrix
       CALL cp_fm_create(matrix=mat_w, matrix_struct=mo%mo_coeff%matrix_struct, &
@@ -219,12 +216,14 @@ CONTAINS
             nc = 1
             DO ic = 1, ec%block(id)%n_atoms
                DO jc = 1, ec%block(id)%atom(ic)%n_ao
-#if defined(__SCALAPACK)
+#if defined(__parallel)
+                  ! global -> local index mapping
                   CALL infog2l(ec%block(id)%atom(ir)%ao_pos + jr - 1, nc, &
                                mat_w%matrix_struct%descriptor, &
                                ns_p_rows, ns_p_cols, cs_row, cs_col, &
                                is_p_row, is_p_col, cs_row_f, cs_col_f)
-                  CALL infog2l(nr, nc, mat_u%matrix_struct%descriptor, &
+                  CALL infog2l(nr, nc, &
+                               mat_u%matrix_struct%descriptor, &
                                nu_p_rows, nu_p_cols, cu_row, cu_col, &
                                iu_p_row, iu_p_col, cu_row_f, cu_col_f)
                   ! Local U element
@@ -234,7 +233,7 @@ CONTAINS
                      IF ((cs_row_f == cs_row) .AND. (cs_col_f == cs_col)) THEN
                         mat_w%local_data(is_p_row, is_p_col) = xu
                      END IF
-                     ! Remote U element
+                  ! Remote U element
                   ELSE
                      CALL mat_u%matrix_struct%context%dgebr2d('All', ' ', 1, 1, xu, 1, &
                              cu_row_f, cu_col_f)
@@ -503,7 +502,7 @@ CONTAINS
       LOGICAL                                            :: found
       INTEGER                                            :: i, j, k, handle
       REAL(KIND=dp)                                      :: c
-#if defined(__SCALAPACK)
+#if defined(__parallel)
       INTEGER                                            :: c_row, c_col, c_row_f, c_col_f
       INTEGER                                            :: i_p_row, i_p_col
       INTEGER                                            :: n_p_rows, n_p_cols
@@ -512,7 +511,7 @@ CONTAINS
       ! Time mark
       CALL timeset(routineN, handle)
 
-#if defined(__SCALAPACK)
+#if defined(__parallel)
       ! number of processors
       n_p_rows = mo%matrix_struct%context%num_pe(1)
       n_p_cols = mo%matrix_struct%context%num_pe(2)
@@ -542,7 +541,7 @@ CONTAINS
 
          ! sum MO coefficients from the atom
          DO k = 1, blk_at(j)%n_ao
-#if defined(__SCALAPACK)
+#if defined(__parallel)
             c = 0.0_dp
             CALL infog2l(blk_at(j)%ao_pos + k - 1, id, mo%matrix_struct%descriptor, &
                          n_p_rows, n_p_cols, c_row, c_col, &
