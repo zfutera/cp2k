@@ -1461,6 +1461,93 @@ CONTAINS
    END SUBROUTINE create_et_coupling_section
 
 ! **************************************************************************************************
+!> \brief defines options in PRINT subsections for the POD input
+!>        (the PRINT section can be specified for each BLOCK)              
+!> \param section pointer to the section data structure
+!> \author Z. Futera (06.2026)
+! **************************************************************************************************
+   SUBROUTINE create_projection_block_print(section)
+
+      ! Routine arguments
+      TYPE(section_type), POINTER                        :: section
+
+      ! Local variables
+      TYPE(keyword_type), POINTER                        :: keyword
+      TYPE(section_type), POINTER                        :: print_key, section_print
+
+      ! Initialization
+      NULLIFY (keyword)
+      NULLIFY (print_key)
+      NULLIFY (section_print)
+
+      ! Sanity check
+      CPASSERT(ASSOCIATED(section))
+
+      ! PROJECTION -> BLOCK -> PRINT
+      CALL section_create(section_print, __LOCATION__, name='PRINT', &
+                          description="Possible printing options in ET system part", &
+                          n_keywords=0, n_subsections=0, repeats=.FALSE.)
+      CALL section_add_subsection(section, section_print)
+
+      ! PROJECTION -> BLOCK -> PRINT -> MO_COEFF_ATOM
+      CALL keyword_create(keyword, __LOCATION__, name='MO_COEFF_ATOM', &
+                          description="Print out MO coeffiecients on given atom", &
+                          usage="MO_COEFF_ATOM {integer} {integer} .. {integer}", &
+                          type_of_var=integer_t, n_var=-1, repeats=.TRUE.)
+      CALL section_add_keyword(section_print, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> BLOCK -> PRINT -> MO_COEFF_ATOM_STATE
+      CALL keyword_create(keyword, __LOCATION__, name='MO_COEFF_ATOM_STATE', &
+                          description="Print out MO coeffiecients of specific state", &
+                          usage="MO_COEFF_ATOM_STATE {integer} {integer} .. {integer}", &
+                          type_of_var=integer_t, n_var=-1, repeats=.TRUE.)
+      CALL section_add_keyword(section_print, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES
+      CALL cp_print_key_section_create(print_key, __LOCATION__, name='MO_CUBES', &
+                                       description="Controls saving of MO cube files", &
+                                       print_level=high_print_level, filename="")
+
+      ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> STRIDE
+      CALL keyword_create(keyword, __LOCATION__, name='STRIDE', &
+                          description="The stride (X,Y,Z) used to write the cube file", &
+                          usage="STRIDE {integer} {integer} {integer}", n_var=-1, &
+                          default_i_vals=[2, 2, 2], type_of_var=integer_t)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> MO_LIST
+      CALL keyword_create(keyword, __LOCATION__, name='MO_LIST', &
+                          description="Indices of molecular orbitals to save", &
+                          usage="MO_LIST {integer} {integer} .. {integer}", &
+                          type_of_var=integer_t, n_var=-1, repeats=.TRUE.)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> NLUMO
+      CALL keyword_create(keyword, __LOCATION__, name='NLUMO', &
+                          description="Number of unoccupied molecular orbitals to save", &
+                          usage="NLUMO {integer}", default_i_val=1)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> NHOMO
+      CALL keyword_create(keyword, __LOCATION__, name='NHOMO', &
+                          description="Number of occupied molecular orbitals to save", &
+                          usage="NHOMO {integer}", default_i_val=1)
+      CALL section_add_keyword(print_key, keyword)
+      CALL keyword_release(keyword)
+
+      CALL section_add_subsection(section_print, print_key)
+      CALL section_release(print_key)
+
+      CALL section_release(section_print)
+
+   END SUBROUTINE create_projection_block_print
+
+! **************************************************************************************************
 !> \brief defines input sections for specification of Hilbert space partitioning
 !>        in projection-operator approach of electronic coupling calulation
 !> \param section pointer to the section data structure
@@ -1475,8 +1562,6 @@ CONTAINS
 
       TYPE(keyword_type), POINTER                        :: keyword
       TYPE(section_type), POINTER                        :: print_key, section_block, section_print
-
-! Routine name for debug purposes
 
       ! Sanity check
       CPASSERT(.NOT. ASSOCIATED(section))
@@ -1587,66 +1672,8 @@ CONTAINS
       CALL keyword_release(keyword)
 
       ! PROJECTION -> BLOCK -> PRINT
-      CALL section_create(section_print, __LOCATION__, name='PRINT', &
-                          description="Possible printing options in ET system part", &
-                          n_keywords=0, n_subsections=0, repeats=.FALSE.)
-      CALL section_add_subsection(section_block, section_print)
+      CALL create_projection_block_print(section_block)
 
-      ! PROJECTION -> BLOCK -> PRINT -> MO_COEFF_ATOM
-      CALL keyword_create(keyword, __LOCATION__, name='MO_COEFF_ATOM', &
-                          description="Print out MO coeffiecients on given atom", &
-                          usage="MO_COEFF_ATOM {integer} {integer} .. {integer}", &
-                          type_of_var=integer_t, n_var=-1, repeats=.TRUE.)
-      CALL section_add_keyword(section_print, keyword)
-      CALL keyword_release(keyword)
-
-      ! PROJECTION -> BLOCK -> PRINT -> MO_COEFF_ATOM_STATE
-      CALL keyword_create(keyword, __LOCATION__, name='MO_COEFF_ATOM_STATE', &
-                          description="Print out MO coeffiecients of specific state", &
-                          usage="MO_COEFF_ATOM_STATE {integer} {integer} .. {integer}", &
-                          type_of_var=integer_t, n_var=-1, repeats=.TRUE.)
-      CALL section_add_keyword(section_print, keyword)
-      CALL keyword_release(keyword)
-
-      ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES
-      CALL cp_print_key_section_create(print_key, __LOCATION__, name='MO_CUBES', &
-                                       description="Controls saving of MO cube files", &
-                                       print_level=high_print_level, filename="")
-
-      ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> STRIDE
-      CALL keyword_create(keyword, __LOCATION__, name='STRIDE', &
-                          description="The stride (X,Y,Z) used to write the cube file", &
-                          usage="STRIDE {integer} {integer} {integer}", n_var=-1, &
-                          default_i_vals=[2, 2, 2], type_of_var=integer_t)
-      CALL section_add_keyword(print_key, keyword)
-      CALL keyword_release(keyword)
-
-      ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> MO_LIST
-      CALL keyword_create(keyword, __LOCATION__, name='MO_LIST', &
-                          description="Indices of molecular orbitals to save", &
-                          usage="MO_LIST {integer} {integer} .. {integer}", &
-                          type_of_var=integer_t, n_var=-1, repeats=.TRUE.)
-      CALL section_add_keyword(print_key, keyword)
-      CALL keyword_release(keyword)
-
-      ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> NLUMO
-      CALL keyword_create(keyword, __LOCATION__, name='NLUMO', &
-                          description="Number of unoccupied molecular orbitals to save", &
-                          usage="NLUMO {integer}", default_i_val=1)
-      CALL section_add_keyword(print_key, keyword)
-      CALL keyword_release(keyword)
-
-      ! PROJECTION -> BLOCK -> PRINT -> MO_CUBES -> NHOMO
-      CALL keyword_create(keyword, __LOCATION__, name='NHOMO', &
-                          description="Number of occupied molecular orbitals to save", &
-                          usage="NHOMO {integer}", default_i_val=1)
-      CALL section_add_keyword(print_key, keyword)
-      CALL keyword_release(keyword)
-
-      CALL section_add_subsection(section_print, print_key)
-      CALL section_release(print_key)
-
-      CALL section_release(section_print)
       CALL section_release(section_block)
 
    END SUBROUTINE create_projection
