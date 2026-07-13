@@ -1461,6 +1461,83 @@ CONTAINS
    END SUBROUTINE create_et_coupling_section
 
 ! **************************************************************************************************
+!> \brief defines options in STATES subsections of BLOCK->PRINT for the POD input
+!>        that allows to save the electronic state values after the projection and 
+!>        visualize them 
+!> \param section pointer to the section data structure
+!> \author Z. Futera (07.2026)
+! **************************************************************************************************
+   SUBROUTINE create_projection_print_states(section)
+
+      ! Routine arguments
+      TYPE(section_type), POINTER                        :: section
+
+      ! Local variables
+      TYPE(keyword_type), POINTER                        :: keyword
+      TYPE(section_type), POINTER                        :: section_states
+
+      ! Initialization
+      NULLIFY (keyword)
+      NULLIFY (section_states)
+
+      ! Sanity check
+      CPASSERT(ASSOCIATED(section))
+
+      ! PROJECTION -> BLOCK -> PRINT -> STATES
+      CALL section_create(section_states, __LOCATION__, name='STATES', &
+                          description="Electronic states saving.", &
+                          n_keywords=0, n_subsections=0, repeats=.FALSE.)
+      CALL section_add_subsection(section, section_states)
+
+      ! PROJECTION -> BLOCK -> PRINT -> STATES -> FILENAME
+      CALL keyword_create(keyword, __LOCATION__, name="FILENAME", &
+                          description="Name of the while where the state energies are saved."// &
+                          " If no name is specified, the default is generated.", &
+                          usage="FILENAME <string>", &
+                          type_of_var=lchar_t)
+      CALL section_add_keyword(section_states, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> BLOCK -> PRINT -> STATES -> GNUPLOT 
+      CALL keyword_create(keyword, __LOCATION__, name="GNUPLOT", &
+                          description="Name of the while where the GnuPlot script is saved.", &
+                          usage="GNUPLOT <string>", &
+                          type_of_var=lchar_t)
+      CALL section_add_keyword(section_states, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> BLOCK -> PRINT -> STATES -> RELATIVE
+      CALL keyword_create(keyword, __LOCATION__, name='RELATIVE', &
+                          description="Absolute energies or relative wrt Fermi level.", &
+                          usage="RELATIVE {logical}", default_l_val=.TRUE.)
+      CALL section_add_keyword(section_states, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> BLOCK -> PRINT -> STATES -> RANGE_MIN
+      CALL keyword_create(keyword, __LOCATION__, name="RANGE_MIN", &
+                          description="Lower bound (if given) of the printed states [eV].", &
+                          usage="RANGE_MIN <energy-value>", &
+                          n_var=1, type_of_var=real_t, &
+                          unit_str="eV", &
+                          default_r_val=0.0_dp)
+      CALL section_add_keyword(section_states, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> BLOCK -> PRINT -> STATES -> RANGE_MAX
+      CALL keyword_create(keyword, __LOCATION__, name="RANGE_MAX", &
+                          description="Upper bound (if given) of the printed states [eV].", &
+                          usage="RANGE_MAX <energy-value>", &
+                          n_var=1, type_of_var=real_t, &
+                          unit_str="eV", &
+                          default_r_val=0.0_dp)
+      CALL section_add_keyword(section_states, keyword)
+      CALL keyword_release(keyword)
+
+      CALL section_release(section_states)
+
+   END SUBROUTINE create_projection_print_states
+
+! **************************************************************************************************
 !> \brief defines options in PRINT subsections for the POD input
 !>        (the PRINT section can be specified for each BLOCK)              
 !> \param section pointer to the section data structure
@@ -1640,6 +1717,10 @@ CONTAINS
                                        print_level=low_print_level)
       CALL section_add_subsection(section_print, print_key)
       CALL section_release(print_key)
+
+      ! PROJECTION -> BLOCK -> PRINT -> STATES
+      CALL create_projection_print_states(section_print)
+
 
       CALL section_release(section_print)
 
