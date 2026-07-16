@@ -1474,37 +1474,28 @@ CONTAINS
 
       ! Local variables
       TYPE(keyword_type), POINTER                        :: keyword
-      TYPE(section_type), POINTER                        :: section_states
+      TYPE(section_type), POINTER                        :: section_states, section_gnuplot
 
       ! Initialization
       NULLIFY (keyword)
+      NULLIFY (section_gnuplot)
       NULLIFY (section_states)
 
       ! Sanity check
       CPASSERT(ASSOCIATED(section))
 
       ! PROJECTION -> BLOCK -> PRINT -> STATES
-      CALL section_create(section_states, __LOCATION__, name='STATES', &
-                          description="Electronic states saving.", &
-                          n_keywords=0, n_subsections=0, repeats=.FALSE.)
+      CALL cp_print_key_section_create(section_states, __LOCATION__, name='STATES', &
+                                       description="Electronic states saving.", &
+                                       print_level=high_print_level, filename="")
       CALL section_add_subsection(section, section_states)
 
-      ! PROJECTION -> BLOCK -> PRINT -> STATES -> FILENAME
-      CALL keyword_create(keyword, __LOCATION__, name="FILENAME", &
-                          description="Name of the while where the state energies are saved."// &
-                          " If no name is specified, the default is generated.", &
-                          usage="FILENAME <string>", &
-                          type_of_var=lchar_t)
-      CALL section_add_keyword(section_states, keyword)
-      CALL keyword_release(keyword)
-
       ! PROJECTION -> BLOCK -> PRINT -> STATES -> GNUPLOT 
-      CALL keyword_create(keyword, __LOCATION__, name="GNUPLOT", &
-                          description="Name of the while where the GnuPlot script is saved.", &
-                          usage="GNUPLOT <string>", &
-                          type_of_var=lchar_t)
-      CALL section_add_keyword(section_states, keyword)
-      CALL keyword_release(keyword)
+      CALL cp_print_key_section_create(section_gnuplot, __LOCATION__, name='GNUPLOT', &
+                                       description="Gnuplot visualization script.", &
+                                       print_level=high_print_level, filename="")
+      CALL section_add_subsection(section_states, section_gnuplot)
+      CALL section_release(section_gnuplot)
 
       ! PROJECTION -> BLOCK -> PRINT -> STATES -> RELATIVE
       CALL keyword_create(keyword, __LOCATION__, name='RELATIVE', &

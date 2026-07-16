@@ -9,19 +9,27 @@
 ! **************************************************************************************************
 MODULE et_coupling_pod_save
 
+   USE cp_control_types,                ONLY: dft_control_type
+   USE cp_files,                        ONLY: close_file,&
+                                              open_file
    USE cp_fm_types,                     ONLY: cp_fm_write_unformatted
    USE cp_log_handling,                 ONLY: cp_get_default_logger,&
                                               cp_logger_type
    USE cp_output_handling,              ONLY: cp_p_file,&
                                               cp_print_key_finished_output,&
+                                              cp_print_key_generate_filename,&
                                               cp_print_key_should_output,&
                                               cp_print_key_unit_nr
+   USE cp_units,                        ONLY: cp_unit_from_cp2k
    USE et_coupling_pod_mo,              ONLY: pod_mo_save
    USE et_coupling_pod_types,           ONLY: et_cpl
    USE input_section_types,             ONLY: section_vals_get_subs_vals,&
                                               section_vals_type,&
                                               section_vals_val_get
-   USE qs_environment_types,            ONLY: qs_environment_type
+   USE kinds,                           ONLY: default_path_length,&
+                                              dp
+   USE qs_environment_types,            ONLY: get_qs_env,&
+                                              qs_environment_type
    USE qs_mo_types,                     ONLY: mo_set_type
 #include "./base/base_uses.f90"
 
@@ -39,6 +47,7 @@ MODULE et_coupling_pod_save
              pod_save_state_coeffs, &
              pod_save_state_cube, &
              pod_save_state_header, &
+             pod_save_states, &
              pod_save_transf_mat
 
 CONTAINS
@@ -464,6 +473,164 @@ CONTAINS
       CALL timestop(handle)
 
    END SUBROUTINE pod_save_state_close
+
+! **************************************************************************************************
+!> \brief save the POD electronic states to external file and create a visualization script
+!> \param output_unit unit number of the open output stream
+!> \param qs_env QuickStep environment containing all system data
+!> \param ec electronic coupling data structure
+!> \author Z. Futera (07.2026)
+! **************************************************************************************************
+   SUBROUTINE pod_save_states(output_unit, qs_env, ec)
+
+      ! Routine arguments
+      INTEGER                                            :: output_unit
+      TYPE(qs_environment_type), POINTER                 :: qs_env
+      TYPE(et_cpl), POINTER                              :: ec
+
+      ! Local variables
+      LOGICAL                                            :: do_save, relative
+      LOGICAL                                            :: has_range_min, has_range_max
+      INTEGER                                            :: i, j, n, na, nb, unit_nr
+      CHARACTER(LEN=default_path_length)                 :: file_dat, file_gpt
+      REAL(KIND=dp)                                      :: range_min, range_max, e, ea, eb
+      TYPE(cp_logger_type), POINTER                      :: logger
+      TYPE(dft_control_type), POINTER                    :: dft_cntrl
+      TYPE(section_vals_type), POINTER                   :: inp_et_print, inp_et_states
+      TYPE(section_vals_type), POINTER                   :: inp_et_gnuplot
+
+      ! Check whether to save states to file or not
+      logger => cp_get_default_logger()
+      inp_et_print => section_vals_get_subs_vals(qs_env%input, &
+                                                'PROPERTIES%ET_COUPLING%PROJECTION%PRINT')
+      do_save = BTEST(cp_print_key_should_output(logger%iter_info, &
+                      inp_et_print, 'STATES'), cp_p_file)
+
+      ! Save the states
+      IF (do_save) THEN
+
+        ! Options
+
+        inp_et_states => section_vals_get_subs_vals(inp_et_print, 'STATES')
+        file_dat = cp_print_key_generate_filename(logger, inp_et_states, middle_name='STATES', &
+                                                  extension='.dat', my_local=.FALSE.)
+
+        inp_et_gnuplot => section_vals_get_subs_vals(inp_et_print, 'STATES%GNUPLOT')
+        file_gpt = cp_print_key_generate_filename(logger, inp_et_gnuplot, middle_name="STATES", &
+                                                  extension='.gpt', my_local=.FALSE.)
+
+        CALL section_vals_val_get(inp_et_states,'RELATIVE',l_val=relative)
+        CALL section_vals_val_get(inp_et_states,'RANGE_MIN',r_val=range_min,explicit=has_range_min)
+        CALL section_vals_val_get(inp_et_states,'RANGE_MAX',r_val=range_max,explicit=has_range_max)
+
+        ! Data file
+
+        IF (file_dat /= '') THEN
+           WRITE (output_unit, '(/,T3,A,A)') &
+                 'Storing electronic states to ', TRIM(ADJUSTL(file_dat))
+
+           IF (relative) THEN
+              WRITE (output_unit, '(T3,A,F8.3,A)') &
+                    ' -- Relative energies wrt to Fermi level (', &
+                    cp_unit_from_cp2k(ec%fermi(1),"ev"),' eV)'
+           ELSE
+              WRITE (output_unit, '(T3,A)') &
+                    ' -- Absolute energies'
+           END IF
+
+           IF (has_range_min .OR. has_range_max) THEN
+             IF (has_range_min) THEN
+                WRITE (output_unit, '(T3,A,F8.3,A)') &
+                      ' -- Energy range lower boundary: ', &
+                      cp_unit_from_cp2k(range_min,"ev"),' eV'
+             END IF
+             IF (has_range_max) THEN
+                WRITE (output_unit, '(T3,A,F8.3,A)') &
+                      ' -- Energy range upper boundary: ', &
+                      cp_unit_from_cp2k(range_max,"ev"),' eV'
+             END IF
+           ELSE
+              WRITE (output_unit, '(T3,A)') &
+                    ' -- All states are saved'
+           END IF
+
+           ! Save states
+
+           CALL get_qs_env(qs_env, dft_control=dft_cntrl)
+
+           CALL open_file(file_name=file_dat, file_action="WRITE", &
+                          unit_number=unit_nr, file_status='REPLACE')
+
+           DO i = 1, ec%n_blocks
+             WRITE(unit_nr, '(A,I5)') &
+               '# POD block ', i
+
+             ! Spin polarized
+             IF (dft_cntrl%nspins > 1) THEN
+
+                na = ec%block(i)%mo(1)%nmo
+                nb = ec%block(i)%mo(1)%nmo
+                n = MAX(na, nb)
+
+                DO j = 1, n
+                   ea = ec%block(i)%mo(1)%eigenvalues(j)
+                   eb = ec%block(i)%mo(2)%eigenvalues(j)
+                   IF (relative) THEN
+                     ea = ea - ec%fermi(1)
+                     eb = eb - ec%fermi(2)
+                   END IF
+                   IF (has_range_min .AND. ea < range_min .AND. eb < range_min) &
+                     CYCLE
+                   IF (has_range_max .AND. ea > range_max .AND. eb > range_max) &
+                     EXIT
+                   IF (j > na) THEN
+                      WRITE (unit_nr, '(I10,A20,F8.3,F12.6)') j, ' ', &
+                        ec%block(i)%mo(2)%occupation_numbers(j), cp_unit_from_cp2k(eb,"ev")
+                   ELSEIF (j > nb) THEN
+                      WRITE (unit_nr, '(I10,F8.3,F12.6,A20)') j, &
+                        ec%block(i)%mo(1)%occupation_numbers(j), cp_unit_from_cp2k(ea,"ev"), ' '
+                   ELSE 
+                      WRITE (unit_nr, '(I10,F8.3,F12.6,F8.3,F12.6)') j, &
+                        ec%block(i)%mo(1)%occupation_numbers(j), cp_unit_from_cp2k(ea,"ev"), &
+                        ec%block(i)%mo(2)%occupation_numbers(j), cp_unit_from_cp2k(eb,"ev")
+                   END IF
+                END DO
+
+             ! Spin non-polarized
+             ELSE
+
+                DO j = 1, ec%block(i)%mo(1)%nmo
+                   e = ec%block(i)%mo(1)%eigenvalues(j)
+                   IF (relative) &
+                     e = e - ec%fermi(1)
+                   IF (has_range_min .AND. e < range_min) &
+                     CYCLE
+                   IF (has_range_max .AND. e > range_max) &
+                     EXIT
+                   WRITE (unit_nr, '(I10,F8.3,F12.6)') &
+                     j, ec%block(i)%mo(1)%occupation_numbers(j), &
+                     cp_unit_from_cp2k(e,"ev")
+                END DO
+
+             END IF
+
+             WRITE(unit_nr, '(/)') 
+           END DO
+
+           CALL close_file(unit_nr)
+
+        END IF
+
+        ! Gnuplot script
+
+        IF (file_gpt /= '') THEN
+           WRITE (output_unit, '(T3,A,A)') &
+                 'Creating Gnuplot visualization script ', TRIM(ADJUSTL(file_gpt))
+        END IF
+
+      END IF
+
+   END SUBROUTINE pod_save_states
 
 ! **************************************************************************************************
 !> \brief save transformation matrix S^{+/-1/2} to binary data file

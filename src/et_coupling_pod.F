@@ -34,7 +34,8 @@ MODULE et_coupling_pod
                                               pod_print_state_fracs,&
                                               pod_print_states
    USE et_coupling_pod_read,            ONLY: pod_read_restart_data
-   USE et_coupling_pod_save,            ONLY: pod_save_state_cube
+   USE et_coupling_pod_save,            ONLY: pod_save_state_cube,&
+                                              pod_save_states
    USE et_coupling_pod_types,           ONLY: et_cpl,&
                                               pod_data_release
    USE et_coupling_pod_utils,           ONLY: pod_check_restart,&
@@ -506,6 +507,10 @@ CONTAINS
                CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
             END DO
 
+            ! Save electronic states
+            CALL pod_save_states(output_unit, qs_env, ec)
+
+            ! Print out coupling elements
             CALL pod_print_couplings(output_unit, qs_env, ec, &
                                      mo(1)%nmo, mo(2)%nmo)
 
@@ -581,14 +586,11 @@ CONTAINS
                CALL pod_print_state_fracs(output_unit, qs_env, ec, i, dft_cntrl%nspins)
             END DO
 
+            ! Save electronic states
+            CALL pod_save_states(output_unit, qs_env, ec)
+
             ! Print out coupling elements
             CALL pod_print_couplings(output_unit, qs_env, ec, mo(1)%nmo)
-
-            ! Save electronic states
-            CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
-
-            ! Save electronic states
-            CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
 
             ! Save electronic states
             CALL pod_save_state_cube(qs_env, ec, dft_cntrl%nspins)
