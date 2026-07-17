@@ -475,6 +475,140 @@ CONTAINS
    END SUBROUTINE pod_save_state_close
 
 ! **************************************************************************************************
+!> \brief save visualization script for plotting the POD states
+!> \param name_gpt name of the Gnuplot script file
+!> \param name_dat name of the data file
+!> \param ns number of spin components
+!> \param nb number of POD blocks
+!> \param e0 lower boundary of the energy range
+!> \param e1 upper boundary of the energy range
+!> \param rel indicates whether the states are relative or absolute
+!> \author Z. Futera (07.2026)
+! **************************************************************************************************
+   SUBROUTINE pod_save_states_gnuplot(name_gpt,name_dat,ns,nb,e0,e1,rel)
+
+      ! Routine arguments
+      CHARACTER(LEN=default_path_length)                 :: name_gpt
+      CHARACTER(LEN=default_path_length)                 :: name_dat
+      INTEGER                                            :: ns
+      INTEGER                                            :: nb
+      REAL(KIND=dp)                                      :: e0
+      REAL(KIND=dp)                                      :: e1
+      LOGICAL                                            :: rel
+
+      ! Local variables
+      INTEGER                                            :: unit_nr, i, n
+      REAL(KIND=dp)                                      :: mx_occ
+      CHARACTER(LEN=default_path_length)                 :: base
+
+      CALL open_file(file_name=name_gpt, file_action="WRITE", &
+                     unit_number=unit_nr, file_status='REPLACE')
+
+      ! File base name
+      base = name_gpt
+      n = SCAN(TRIM(name_gpt),'.',BACK=.true.)
+      IF (n > 0) &
+        base = name_gpt(1:n)
+
+      ! Full occupancy
+      mx_occ = 2.0
+      IF (ns > 1) &
+        mx_occ = 1.0
+
+      WRITE(unit_nr, '(A)') '#!gnuplot'
+      WRITE(unit_nr, '(A)') &
+        '################################################################################'
+      WRITE(unit_nr, '(A)') 'fl = "'//TRIM(name_dat)//'"'
+      WRITE(unit_nr, '(A)') &
+        '################################################################################'
+      WRITE(unit_nr, '(A,F8.3)') 'e_min = ', cp_unit_from_cp2k(e0,"ev")
+      WRITE(unit_nr, '(A,F8.3)') 'e_max = ', cp_unit_from_cp2k(e1,"ev")
+      WRITE(unit_nr, '(A)') &
+        '################################################################################'
+      WRITE(unit_nr, '(A,F4.1)') 'fig_size_x = ',4.0
+      WRITE(unit_nr, '(A,F4.1)') 'fig_size_y = ',4.0
+      WRITE(unit_nr, '(A,I4)')   'plt_num_x  = ',nb
+      WRITE(unit_nr, '(A,I4)')   'plt_num_y  = ',1
+      WRITE(unit_nr, '(A,F4.1)') 'plt_off_x0 = ',10.0
+      WRITE(unit_nr, '(A,F4.1)') 'plt_off_x1 = ',1.0
+      WRITE(unit_nr, '(A,F4.1)') 'plt_off_y0 = ',1.0
+      WRITE(unit_nr, '(A,F4.1)') 'plt_off_y1 = ',7.0
+      WRITE(unit_nr, '(A,F4.1)') 'plt_sep_x  = ',1.0
+      WRITE(unit_nr, '(A,F4.1)') 'plt_sep_y  = ',1.0
+      WRITE(unit_nr, '(A)') &
+        'plt_size_x = (100.0-plt_off_x0-plt_off_x1-((plt_num_x-1)*plt_sep_x))/plt_num_x'
+      WRITE(unit_nr, '(A)') &
+        'plt_size_y = (100.0-plt_off_y0-plt_off_y1-((plt_num_y-1)*plt_sep_y))/plt_num_y'
+      WRITE(unit_nr, '(A)') &
+        '################################################################################'
+      WRITE(unit_nr, '(A)') 'cl_oc = "#0055ff"'
+      WRITE(unit_nr, '(A)') 'cl_un = "#ff5500"'
+      WRITE(unit_nr, '(A)') &
+        '################################################################################'
+      WRITE(unit_nr, '(A)') 'set terminal pdfcairo transparent truecolor enhanced \'
+      WRITE(unit_nr, '(A)') 'background rgb "white" dashed font "Helvetica, 12" \'
+      WRITE(unit_nr, '(A)') 'size fig_size_x,fig_size_y'
+      WRITE(unit_nr, '(A)') 'set encoding iso_8859_1'
+      WRITE(unit_nr, '(A)') 'set output "'//TRIM(base)//'pdf"'
+      WRITE(unit_nr, '(A)') 'set multiplot'
+      WRITE(unit_nr, '(A)') 'set size plt_size_x/100,plt_size_y/100'
+      WRITE(unit_nr, '(A)') &
+        '################################################################################'
+      WRITE(unit_nr, '(A,F3.1)') 'x_min = ',0.0
+      WRITE(unit_nr, '(A,F3.1)') 'x_max = ',1.0
+      WRITE(unit_nr, '(A)') 'y_off = 0.05*(e_max - e_min)'
+      WRITE(unit_nr, '(A)') 'set xrange [x_min:x_max]'
+      WRITE(unit_nr, '(A)') 'set yrange [e_min-y_off:e_max+y_off]'
+      WRITE(unit_nr, '(A)') &
+        '################################################################################'
+      WRITE(unit_nr, '(A)') 'set tmargin 0'
+      WRITE(unit_nr, '(A)') 'set bmargin 0'
+      WRITE(unit_nr, '(A)') 'set lmargin 0'
+      WRITE(unit_nr, '(A)') 'set rmargin 0'
+      WRITE(unit_nr, '(A)') 'set nokey'
+      WRITE(unit_nr, '(A)') 'set noxtics'
+      WRITE(unit_nr, '(A)') 'set format x ""'
+      WRITE(unit_nr, '(A,F3.1,A)') 'set cbrange [0.0:',mx_occ,']'
+      WRITE(unit_nr, '(A,F3.1,A)') 'set palette defined ( 0.0 cl_un, ',mx_occ,' cl_oc )'
+      WRITE(unit_nr, '(A)') 'unset colorbox'
+      WRITE(unit_nr, '(A)') &
+        '################################################################################'
+
+      DO i = 1, nb
+        WRITE(unit_nr, '(A,I3,A)') &
+          'set origin (plt_off_x0+',i-1,'*(plt_size_x+plt_sep_x))/100,\'
+        WRITE(unit_nr, '(A)') &
+          '  (plt_off_y0+0*(plt_size_y+plt_sep_y))/100'
+        WRITE(unit_nr, '(A,I3,A)') &
+          'set title "Block ',i,'" offset 0.0,-0.5'
+        IF (i == 1) THEN
+          IF (rel) THEN
+            WRITE(unit_nr, '(A)') 'set ylabel "E - E_F [eV]"'
+          ELSE
+            WRITE(unit_nr, '(A)') 'set ylabel "E [eV]"'
+          END IF
+          WRITE(unit_nr, '(A)') 'set format y "%3.0f"'
+        ELSE
+          WRITE(unit_nr, '(A)') 'set ylabel ""'
+          WRITE(unit_nr, '(A)') 'set format y ""'
+        END IF
+        WRITE(unit_nr, '(A)') 'plot \'
+        WRITE(unit_nr, '(A,I3,A)') &
+          '  fl index ',i-1,' u (0.1):3:(0.8):(0):2 w vectors nohead \'
+        WRITE(unit_nr, '(A)') &
+          '     lt 1 lw 1.25 lc palette'
+        WRITE(unit_nr, '(A)') &
+          '################################################################################'
+      END DO
+
+      WRITE(unit_nr, '(A)') 'set nomultiplot'
+      WRITE(unit_nr, '(A)') 'quit'
+
+      CALL close_file(unit_nr)
+
+   END SUBROUTINE pod_save_states_gnuplot
+
+! **************************************************************************************************
 !> \brief save the POD electronic states to external file and create a visualization script
 !> \param output_unit unit number of the open output stream
 !> \param qs_env QuickStep environment containing all system data
@@ -493,7 +627,8 @@ CONTAINS
       LOGICAL                                            :: has_range_min, has_range_max
       INTEGER                                            :: i, j, n, na, nb, unit_nr
       CHARACTER(LEN=default_path_length)                 :: file_dat, file_gpt
-      REAL(KIND=dp)                                      :: range_min, range_max, e, ea, eb
+      REAL(KIND=dp)                                      :: range_min, range_max
+      REAL(KIND=dp)                                      :: e, ea, eb, e0, e1, e_min, e_max
       TYPE(cp_logger_type), POINTER                      :: logger
       TYPE(dft_control_type), POINTER                    :: dft_cntrl
       TYPE(section_vals_type), POINTER                   :: inp_et_print, inp_et_states
@@ -538,16 +673,21 @@ CONTAINS
                     ' -- Absolute energies'
            END IF
 
+           e0 = 0.0d0
+           e1 = 0.0d0
+
            IF (has_range_min .OR. has_range_max) THEN
              IF (has_range_min) THEN
                 WRITE (output_unit, '(T3,A,F8.3,A)') &
                       ' -- Energy range lower boundary: ', &
                       cp_unit_from_cp2k(range_min,"ev"),' eV'
+                e0 = range_min
              END IF
              IF (has_range_max) THEN
                 WRITE (output_unit, '(T3,A,F8.3,A)') &
                       ' -- Energy range upper boundary: ', &
                       cp_unit_from_cp2k(range_max,"ev"),' eV'
+                e1 = range_max
              END IF
            ELSE
               WRITE (output_unit, '(T3,A)') &
@@ -561,6 +701,13 @@ CONTAINS
            CALL open_file(file_name=file_dat, file_action="WRITE", &
                           unit_number=unit_nr, file_status='REPLACE')
 
+           IF (.NOT.has_range_min) THEN
+             IF (ec%n_blocks > 0) THEN
+               e0 = ec%block(1)%mo(1)%eigenvalues(1)
+               e1 = ec%block(1)%mo(1)%eigenvalues(1)
+             END IF
+           END IF
+
            DO i = 1, ec%n_blocks
              WRITE(unit_nr, '(A,I5)') &
                '# POD block ', i
@@ -571,6 +718,21 @@ CONTAINS
                 na = ec%block(i)%mo(1)%nmo
                 nb = ec%block(i)%mo(1)%nmo
                 n = MAX(na, nb)
+
+                ea = 0.0d0
+                eb = 0.0d0
+                IF (relative) THEN
+                  ea = ec%fermi(1);
+                  eb = ec%fermi(2);
+                END IF
+                IF (.NOT.has_range_min .AND. ec%block(i)%mo(1)%nmo > 0) THEN
+                   e0 = MIN(e0,ec%block(i)%mo(1)%eigenvalues(1)-ea)
+                   e0 = MIN(e0,ec%block(i)%mo(2)%eigenvalues(1)-eb)
+                END IF
+                IF (.NOT.has_range_max .AND. ec%block(i)%mo(1)%nmo > 0) THEN
+                   e1 = MAX(e1,ec%block(i)%mo(1)%eigenvalues(ec%block(i)%mo(1)%nmo)-ea)
+                   e1 = MAX(e1,ec%block(i)%mo(2)%eigenvalues(ec%block(i)%mo(1)%nmo)-eb)
+                END IF
 
                 DO j = 1, n
                    ea = ec%block(i)%mo(1)%eigenvalues(j)
@@ -599,6 +761,14 @@ CONTAINS
              ! Spin non-polarized
              ELSE
 
+                e = 0.0d0
+                IF (relative) &
+                  e = ec%fermi(1);
+                IF (.NOT.has_range_min .AND. ec%block(i)%mo(1)%nmo > 0) &
+                   e0 = MIN(e0,ec%block(i)%mo(1)%eigenvalues(1)-e)
+                IF (.NOT.has_range_max .AND. ec%block(i)%mo(1)%nmo > 0) &
+                   e1 = MAX(e1,ec%block(i)%mo(1)%eigenvalues(ec%block(i)%mo(1)%nmo)-e)
+
                 DO j = 1, ec%block(i)%mo(1)%nmo
                    e = ec%block(i)%mo(1)%eigenvalues(j)
                    IF (relative) &
@@ -626,6 +796,10 @@ CONTAINS
         IF (file_gpt /= '') THEN
            WRITE (output_unit, '(T3,A,A)') &
                  'Creating Gnuplot visualization script ', TRIM(ADJUSTL(file_gpt))
+
+           CALL  pod_save_states_gnuplot(file_gpt,file_dat, &
+                   dft_cntrl%nspins,ec%n_blocks,e0,e1,relative)
+
         END IF
 
       END IF

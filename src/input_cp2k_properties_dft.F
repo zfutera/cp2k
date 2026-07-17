@@ -1500,7 +1500,8 @@ CONTAINS
       ! PROJECTION -> BLOCK -> PRINT -> STATES -> RELATIVE
       CALL keyword_create(keyword, __LOCATION__, name='RELATIVE', &
                           description="Absolute energies or relative wrt Fermi level.", &
-                          usage="RELATIVE {logical}", default_l_val=.TRUE.)
+                          usage="RELATIVE {logical}", default_l_val=.TRUE., &
+                          lone_keyword_l_val=.TRUE.)
       CALL section_add_keyword(section_states, keyword)
       CALL keyword_release(keyword)
 
