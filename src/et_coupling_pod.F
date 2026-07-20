@@ -30,6 +30,7 @@ MODULE et_coupling_pod
                                               cp_print_key_unit_nr
    USE et_coupling_pod_core,            ONLY: pod_block_diag,&
                                               pod_block_hamiltonian
+   USE et_coupling_pod_corr,            ONLY: pod_corr
    USE et_coupling_pod_print,           ONLY: pod_print_couplings,&
                                               pod_print_state_fracs,&
                                               pod_print_states
@@ -494,6 +495,9 @@ CONTAINS
                CALL pod_block_diag(output_unit, qs_env, ec, mat_h, dft_cntrl%nspins, &
                                    restart, blocks_only)
 
+               ! State corrections
+               CALL pod_corr(output_unit, qs_env, ec)
+
             END IF
 
             ! Print out energies and couplings
@@ -573,6 +577,9 @@ CONTAINS
                ! Block diagonization
                CALL pod_block_diag(output_unit, qs_env, ec, mat_h, dft_cntrl%nspins, &
                                    restart, blocks_only)
+
+               ! State corrections
+               CALL pod_corr(output_unit, qs_env, ec)
 
             END IF
 

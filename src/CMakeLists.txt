@@ -169,6 +169,7 @@ list(
   et_coupling.F
   et_coupling_pod.F
   et_coupling_pod_core.F
+  et_coupling_pod_corr.F
   et_coupling_pod_mo.F
   et_coupling_pod_print.F
   et_coupling_pod_read.F
