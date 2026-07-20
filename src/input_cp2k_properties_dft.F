@@ -1461,7 +1461,7 @@ CONTAINS
    END SUBROUTINE create_et_coupling_section
 
 ! **************************************************************************************************
-!> \brief defines options in STATES subsections of BLOCK->PRINT for the POD input
+!> \brief defines options in STATES subsections of PROJECTION->PRINT for the POD input
 !>        that allows to save the electronic state values after the projection and 
 !>        visualize them 
 !> \param section pointer to the section data structure
@@ -1484,20 +1484,20 @@ CONTAINS
       ! Sanity check
       CPASSERT(ASSOCIATED(section))
 
-      ! PROJECTION -> BLOCK -> PRINT -> STATES
+      ! PROJECTION -> PRINT -> STATES
       CALL cp_print_key_section_create(section_states, __LOCATION__, name='STATES', &
                                        description="Electronic states saving.", &
                                        print_level=high_print_level, filename="")
       CALL section_add_subsection(section, section_states)
 
-      ! PROJECTION -> BLOCK -> PRINT -> STATES -> GNUPLOT 
+      ! PROJECTION -> PRINT -> STATES -> GNUPLOT 
       CALL cp_print_key_section_create(section_gnuplot, __LOCATION__, name='GNUPLOT', &
                                        description="Gnuplot visualization script.", &
                                        print_level=high_print_level, filename="")
       CALL section_add_subsection(section_states, section_gnuplot)
       CALL section_release(section_gnuplot)
 
-      ! PROJECTION -> BLOCK -> PRINT -> STATES -> RELATIVE
+      ! PROJECTION -> PRINT -> STATES -> RELATIVE
       CALL keyword_create(keyword, __LOCATION__, name='RELATIVE', &
                           description="Absolute energies or relative wrt Fermi level.", &
                           usage="RELATIVE {logical}", default_l_val=.TRUE., &
@@ -1505,7 +1505,7 @@ CONTAINS
       CALL section_add_keyword(section_states, keyword)
       CALL keyword_release(keyword)
 
-      ! PROJECTION -> BLOCK -> PRINT -> STATES -> RANGE_MIN
+      ! PROJECTION -> PRINT -> STATES -> RANGE_MIN
       CALL keyword_create(keyword, __LOCATION__, name="RANGE_MIN", &
                           description="Lower bound (if given) of the printed states [eV].", &
                           usage="RANGE_MIN <energy-value>", &
@@ -1515,7 +1515,7 @@ CONTAINS
       CALL section_add_keyword(section_states, keyword)
       CALL keyword_release(keyword)
 
-      ! PROJECTION -> BLOCK -> PRINT -> STATES -> RANGE_MAX
+      ! PROJECTION -> PRINT -> STATES -> RANGE_MAX
       CALL keyword_create(keyword, __LOCATION__, name="RANGE_MAX", &
                           description="Upper bound (if given) of the printed states [eV].", &
                           usage="RANGE_MAX <energy-value>", &
@@ -1528,6 +1528,79 @@ CONTAINS
       CALL section_release(section_states)
 
    END SUBROUTINE create_projection_print_states
+
+! **************************************************************************************************
+!> \brief defines options for applying DFT+Sigma corrections to POD states in specific block
+!> \param section pointer to the section data structure
+!> \author Z. Futera (07.2026)
+! **************************************************************************************************
+   SUBROUTINE create_projection_block_sigma(section)
+
+      ! Routine arguments
+      TYPE(section_type), POINTER                        :: section
+
+      ! Local variables
+      TYPE(keyword_type), POINTER                        :: keyword
+      TYPE(section_type), POINTER                        :: section_sigma
+
+      ! Initialization
+      NULLIFY (keyword)
+      NULLIFY (section_sigma)
+
+      ! Sanity check
+      CPASSERT(ASSOCIATED(section))
+
+      ! PROJECTION -> BLOCK -> SIGMA
+      CALL section_create(section_sigma, __LOCATION__, name="SIGMA", &
+                          description="DFT+Sigma corrections for POD block states", &
+                          n_keywords=4, n_subsections=0, repeats=.FALSE.)
+      CALL section_add_subsection(section, section_sigma)
+
+      ! PROJECTION -> BLOCK -> SIGMA -> OCCUPIED
+      CALL keyword_create(keyword, __LOCATION__, name="OCCUPIED", &
+                          variants=s2a("OCCUPIED_ALPHA"), &
+                          description="Shift for all (alpha-spin) occupied states [eV].", &
+                          usage="OCCUPIED <shift-value>", &
+                          n_var=1, type_of_var=real_t, &
+                          unit_str="eV", &
+                          default_r_val=0.0_dp)
+      CALL section_add_keyword(section_sigma, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> BLOCK -> SIGMA -> OCCUPIED_BETA
+      CALL keyword_create(keyword, __LOCATION__, name="OCCUPIED_BETA", &
+                          description="Shift for all beta-spin occupied states [eV].", &
+                          usage="OCCUPIED_BETA <shift-value>", &
+                          n_var=1, type_of_var=real_t, &
+                          unit_str="eV", &
+                          default_r_val=0.0_dp)
+      CALL section_add_keyword(section_sigma, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> BLOCK -> SIGMA -> UNOCCUPIED
+      CALL keyword_create(keyword, __LOCATION__, name="UNOCCUPIED", &
+                          variants=s2a("UNOCCUPIED_ALPHA"), &
+                          description="Shift for all (alpha-spin) unoccupied states [eV].", &
+                          usage="UNOCCUPIED <shift-value>", &
+                          n_var=1, type_of_var=real_t, &
+                          unit_str="eV", &
+                          default_r_val=0.0_dp)
+      CALL section_add_keyword(section_sigma, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> BLOCK -> SIGMA -> UNOCCUPIED_BETA
+      CALL keyword_create(keyword, __LOCATION__, name="UNOCCUPIED_BETA", &
+                          description="Shift for all beta-spin unoccupied states [eV].", &
+                          usage="UNOCCUPIED_BETA <shift-value>", &
+                          n_var=1, type_of_var=real_t, &
+                          unit_str="eV", &
+                          default_r_val=0.0_dp)
+      CALL section_add_keyword(section_sigma, keyword)
+      CALL keyword_release(keyword)
+
+      CALL section_release(section_sigma)
+
+   END SUBROUTINE create_projection_block_sigma
 
 ! **************************************************************************************************
 !> \brief defines options in PRINT subsections for the POD input
@@ -1710,7 +1783,7 @@ CONTAINS
       CALL section_add_subsection(section_print, print_key)
       CALL section_release(print_key)
 
-      ! PROJECTION -> BLOCK -> PRINT -> STATES
+      ! PROJECTION -> PRINT -> STATES
       CALL create_projection_print_states(section_print)
 
 
@@ -1743,6 +1816,9 @@ CONTAINS
                           usage="SKIP {logical}", default_l_val=.FALSE.)
       CALL section_add_keyword(section_block, keyword)
       CALL keyword_release(keyword)
+
+      ! PROJECTION -> BLOCK -> SIGMA
+      CALL create_projection_block_sigma(section_block)
 
       ! PROJECTION -> BLOCK -> PRINT
       CALL create_projection_block_print(section_block)
