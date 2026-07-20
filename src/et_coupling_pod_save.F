@@ -593,10 +593,21 @@ CONTAINS
           WRITE(unit_nr, '(A)') 'set format y ""'
         END IF
         WRITE(unit_nr, '(A)') 'plot \'
-        WRITE(unit_nr, '(A,I3,A)') &
-          '  fl index ',i-1,' u (0.1):3:(0.8):(0):2 w vectors nohead \'
-        WRITE(unit_nr, '(A)') &
-          '     lt 1 lw 1.25 lc palette'
+        IF (ns > 1) THEN
+          WRITE(unit_nr, '(A,I3,A)') &
+            '  fl index ',i-1,' u (0.100):3:(0.375):(0):2 w vectors nohead \'
+          WRITE(unit_nr, '(A)') &
+            '     lt 1 lw 1.25 lc palette, \'
+          WRITE(unit_nr, '(A,I3,A)') &
+            '  fl index ',i-1,' u (0.525):5:(0.375):(0):4 w vectors nohead \'
+          WRITE(unit_nr, '(A)') &
+            '     lt 1 lw 1.25 lc palette'
+        ELSE
+          WRITE(unit_nr, '(A,I3,A)') &
+            '  fl index ',i-1,' u (0.1):3:(0.8):(0):2 w vectors nohead \'
+          WRITE(unit_nr, '(A)') &
+            '     lt 1 lw 1.25 lc palette'
+        END IF
         WRITE(unit_nr, '(A)') &
           '################################################################################'
       END DO
@@ -661,16 +672,18 @@ CONTAINS
         ! Data file
 
         IF (file_dat /= '') THEN
-           WRITE (output_unit, '(/,T3,A,A)') &
-                 'Storing electronic states to ', TRIM(ADJUSTL(file_dat))
-
-           IF (relative) THEN
-              WRITE (output_unit, '(T3,A,F8.3,A)') &
-                    ' -- Relative energies wrt to Fermi level (', &
-                    cp_unit_from_cp2k(ec%fermi(1),"ev"),' eV)'
-           ELSE
-              WRITE (output_unit, '(T3,A)') &
-                    ' -- Absolute energies'
+           IF (output_unit > 0) THEN
+             WRITE (output_unit, '(/,T3,A,A)') &
+                   'Storing electronic states to ', TRIM(ADJUSTL(file_dat))
+ 
+             IF (relative) THEN
+                WRITE (output_unit, '(T3,A,F8.3,A)') &
+                      ' -- Relative energies wrt to Fermi level (', &
+                      cp_unit_from_cp2k(ec%fermi(1),"ev"),' eV)'
+             ELSE
+                WRITE (output_unit, '(T3,A)') &
+                      ' -- Absolute energies'
+             END IF
            END IF
 
            e0 = 0.0d0
@@ -678,18 +691,20 @@ CONTAINS
 
            IF (has_range_min .OR. has_range_max) THEN
              IF (has_range_min) THEN
-                WRITE (output_unit, '(T3,A,F8.3,A)') &
-                      ' -- Energy range lower boundary: ', &
+                IF (output_unit > 0) &
+                  WRITE (output_unit, '(T3,A,F8.3,A)') &
+                        ' -- Energy range lower boundary: ', &
                       cp_unit_from_cp2k(range_min,"ev"),' eV'
                 e0 = range_min
              END IF
              IF (has_range_max) THEN
-                WRITE (output_unit, '(T3,A,F8.3,A)') &
-                      ' -- Energy range upper boundary: ', &
-                      cp_unit_from_cp2k(range_max,"ev"),' eV'
+                IF (output_unit > 0) &
+                  WRITE (output_unit, '(T3,A,F8.3,A)') &
+                        ' -- Energy range upper boundary: ', &
+                        cp_unit_from_cp2k(range_max,"ev"),' eV'
                 e1 = range_max
              END IF
-           ELSE
+           ELSE IF (output_unit > 0) THEN
               WRITE (output_unit, '(T3,A)') &
                     ' -- All states are saved'
            END IF
@@ -794,8 +809,9 @@ CONTAINS
         ! Gnuplot script
 
         IF (file_gpt /= '') THEN
-           WRITE (output_unit, '(T3,A,A)') &
-                 'Creating Gnuplot visualization script ', TRIM(ADJUSTL(file_gpt))
+           IF (output_unit > 0) &
+             WRITE (output_unit, '(T3,A,A)') &
+                   'Creating Gnuplot visualization script ', TRIM(ADJUSTL(file_gpt))
 
            CALL  pod_save_states_gnuplot(file_gpt,file_dat, &
                    dft_cntrl%nspins,ec%n_blocks,e0,e1,relative)
