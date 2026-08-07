@@ -1428,4 +1428,10 @@ MODULE input_constants
    INTEGER, PARAMETER, PUBLIC               :: smeagol_runtype_bulktransport = 0, &
                                                smeagol_runtype_emtransport = 1
 
+   ! POD method
+   INTEGER, PARAMETER, PUBLIC               :: pod_fermi_fix_none = 0, &
+                                               pod_fermi_fix_system = 1, &
+                                               pod_fermi_fix_parts = 2, &
+                                               pod_fermi_fix_sigma = 3
+
 END MODULE input_constants

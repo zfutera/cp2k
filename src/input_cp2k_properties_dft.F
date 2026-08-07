@@ -43,7 +43,8 @@ MODULE input_cp2k_properties_dft
       tddfpt_dipole_berry, tddfpt_dipole_length, tddfpt_dipole_scf_moment, &
       tddfpt_dipole_velocity, tddfpt_dipole_velocity_old, tddfpt_kernel_full, tddfpt_kernel_none, &
       tddfpt_kernel_stda, no_sf_tddfpt, tddfpt_sf_col, tddfpt_sf_noncol, use_mom_ref_coac, &
-      use_mom_ref_com, use_mom_ref_user, use_mom_ref_zero
+      use_mom_ref_com, use_mom_ref_user, use_mom_ref_zero, pod_fermi_fix_none, &
+      pod_fermi_fix_system, pod_fermi_fix_parts, pod_fermi_fix_sigma
    USE input_cp2k_atprop, ONLY: create_atprop_section
    USE input_cp2k_dft, ONLY: create_interp_section, &
                              create_mgrid_section
@@ -1530,6 +1531,98 @@ CONTAINS
    END SUBROUTINE create_projection_print_states
 
 ! **************************************************************************************************
+!> \brief specification of a method to fix the Fermi level for the POD states
+!> \param section pointer to the section data structure
+!> \author Z. Futera (07.2026)
+! **************************************************************************************************
+   SUBROUTINE create_projection_fermi(section)
+
+      ! Routine arguments
+      TYPE(section_type), POINTER                        :: section
+
+      ! Local variables
+      TYPE(keyword_type), POINTER                        :: keyword
+      TYPE(section_type), POINTER                        :: section_fermi, section_min
+
+      ! Initialization
+      NULLIFY (keyword)
+      NULLIFY (section_fermi)
+      NULLIFY (section_min)
+
+      ! Sanity check
+      CPASSERT(ASSOCIATED(section))
+
+      ! PROJECTION -> FERMI
+      CALL section_create(section_fermi, __LOCATION__, name="FERMI", &
+                          description="Fermi level determination for POD states", &
+                          n_keywords=1, n_subsections=1, repeats=.FALSE.)
+      CALL section_add_subsection(section, section_fermi)
+
+      ! PROJECTION -> FERMI -> TEMPERATURE
+      CALL keyword_create(keyword, __LOCATION__, name="TEMPERATURE", &
+                          description="Electronic temperature for Fermi-Dirac distribution [K]", &
+                          usage="TEMPERATURE <value>", &
+                          n_var=1, type_of_var=real_t, &
+                          unit_str="K", &
+                          default_r_val=300.0_dp)
+      CALL section_add_keyword(section_fermi, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> FERMI -> CONSTRAIN
+      CALL keyword_create(keyword, __LOCATION__, name="CONSTRAIN", &
+                          description="Type of constrain", &
+                          usage="CONSTRAIN <keyword>", &
+                          default_i_val=pod_fermi_fix_none, &
+                          enum_c_vals=s2a("none","system","parts","sigma"), &
+                          enum_i_vals=[pod_fermi_fix_none, pod_fermi_fix_system, &
+                                       pod_fermi_fix_parts, pod_fermi_fix_sigma], &
+                          enum_desc=s2a("No constrain, use KS Fermi level.", &
+                                        "Fix total number of electon in the whole system.", &
+                                        "Fix number of electrons in the individual POD blocks.", &
+                                        "Self-consistent fix of total number of electrons "// &
+                                        "and application of DFT+Sigma correction."))
+      CALL section_add_keyword(section_fermi, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> FERMI -> MINIMIZER
+      CALL section_create(section_min, __LOCATION__, name="MINIMIZER", &
+                          description="Minimizer for Fermi level determination "// &
+                                      "(minimization of |\sum occ - N_el| function)", &
+                          n_keywords=3, n_subsections=0, repeats=.FALSE.)
+      CALL section_add_subsection(section_fermi, section_min)
+
+      ! PROJECTION -> FERMI -> MINIMIZER -> MAX_ITER
+      CALL keyword_create(keyword, __LOCATION__, name="MAX_ITER", &
+                          description="Maximum number of iterations", &
+                          usage="MAX_ITER <number>", &
+                          n_var=1, type_of_var=integer_t, &
+                          default_i_val=100)
+      CALL section_add_keyword(section_min, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> FERMI -> MINIMIZER -> THRESHOLD
+      CALL keyword_create(keyword, __LOCATION__, name="THRESHOLD", &
+                          description="Convergence threshold [eV]", &
+                          usage="THRESHOLD <value>", &
+                          n_var=1, type_of_var=real_t, &
+                          unit_str="eV", &
+                          default_r_val=1.0d-4)
+      CALL section_add_keyword(section_min, keyword)
+      CALL keyword_release(keyword)
+
+      ! PROJECTION -> FERMI -> MINIMIZER -> TRUST
+      CALL keyword_create(keyword, __LOCATION__, name="TRUST", &
+                          description="Trust radius [eV]", &
+                          usage="TRUST <value>", &
+                          n_var=1, type_of_var=real_t, &
+                          unit_str="eV", &
+                          default_r_val=1.0d-3)
+      CALL section_add_keyword(section_min, keyword)
+      CALL keyword_release(keyword)
+
+   END SUBROUTINE create_projection_fermi
+
+! **************************************************************************************************
 !> \brief defines options for applying DFT+Sigma corrections to POD states in specific block
 !> \param section pointer to the section data structure
 !> \author Z. Futera (07.2026)
@@ -1824,6 +1917,9 @@ CONTAINS
       CALL create_projection_block_print(section_block)
 
       CALL section_release(section_block)
+
+      ! PROJECTION -> FERMI
+      CALL create_projection_fermi(section)
 
    END SUBROUTINE create_projection
 
